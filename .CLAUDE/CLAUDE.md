@@ -2,7 +2,7 @@
 
 > **IMPORTANT:** Read `CLAUDE-COMMON.md` first — it contains general must-follow instructions (companion files, deployment model, workflow, template structure). This file contains repo-specific instructions. Anything here overrides `CLAUDE-COMMON.md`.
 >
-> **Also read `PROJ_STARTER.md`** — it contains the owner's personal preferences (interaction rules, coding standards, tech stack choices, commit style). Copy its sections into any new project's `CLAUDE.md` User Rules alongside the rules from `CLAUDE-COMMON.md`.
+> **Also read `PROJ_STARTER.md`** — it contains the owner's personal preferences (interaction rules, coding standards, tech stack choices, commit style).
 
 ---
 
@@ -14,7 +14,7 @@ This repo holds **two independent copies** of the template, kept as separate bra
 
 | Branch | Content |
 |--------|---------|
-| `main` | The generic template (this branch) |
+| `main` | The generic template (this branch) — now also hosts the LAXTHYA-Ink project (see below) |
 | `machine-vision` | The same template plus the machine-vision baseline — four gates, docs, tools, Roboflow skills |
 
 - **Never merge, rebase, or open a PR between `main` and `machine-vision`, in either direction.** They are meant to diverge. `machine-vision` is a personal copy, not a feature branch.
@@ -24,143 +24,194 @@ This repo holds **two independent copies** of the template, kept as separate bra
 
 ---
 
-## About This Repository
+## Project Overview
 
-This repo is a curated library of `CLAUDE.md` files. Each file serves as a project brief for AI-assisted development sessions — capturing architecture, rules, conventions, and status so that Claude Code can contribute effectively without needing to re-discover project context from scratch.
+**LAXTHYA-Ink** mounts a pen on a Creality Ender-3 V3 SE and makes it write text **in a specific person's own handwriting**. The motivating use is people who have recently lost control of their writing hand: capture their handwriting once, then let the printer write for them in their own hand. A second goal is to **learn a writer's style automatically from their real handwriting samples** (models and methods to be developed, Phase 3+).
 
-The files here are used as **standard templates and reference material** for future projects.
+- **Author:** kl mithunvel. **License:** see `LICENSE`. **Version:** `VERSION`.
+- **Entry point:** `python main.py` (`laxthya_ink/cli.py`).
+- **Runtime:** Python ≥ 3.12 (dev machine runs 3.13); Windows 11 host tethered to the printer over USB-C.
+- **Sibling project:** the printer link is ported from the Ender-3 V3 SE magnet-embed project (`PycharmProjects/Creality-Ender-3-V3-SE-`, public at `KL-Mithunvel/Creality-Ender-3-V3-SE-`), where it was verified on real hardware (COM3, 115200).
+- **Plan and phases:** `docs/PROJECT_PLAN.md`.
 
-| File | Purpose |
-|------|---------|
-| `CLAUDE.md` | Project template — copy this into new projects |
-| `CLAUDE-COMMON.md` | Universal workflow rules — must-follow for every project |
-| `PROJ_STARTER.md` | Personal preferences and tech stack defaults — copy into new projects |
-| `<project-id>.md` | `<Project name — one-line description>` |
+### Current status (2026-10-28)
 
-New entries follow the same naming convention: `<short-project-id>.md`.
-
----
-
-## How to Start a New Project
-
-1. Copy `CLAUDE.md` into the new project root (keep the name `CLAUDE.md`).
-2. Copy `CLAUDE-COMMON.md` and `PROJ_STARTER.md` alongside it, or reference the ones in this library.
-3. Fill in every `[TO BE FILLED]` section below with the project's actual details.
-4. In the **User Rules** section: copy `CLAUDE-COMMON.md` → Standard User Rules verbatim, then copy `PROJ_STARTER.md` contents below that. Add project-specific overrides last, clearly labelled.
-5. Delete any `[if applicable]` sections that do not apply to the project.
+Phase 1 software is done and tested on the dev machine (111 tests): stroke file → layout → G-code → simulated printer → pen-path preview. **Nothing has run on the real printer yet.** No handwriting capture and no learning model exist yet.
 
 ---
 
-## Project Overview  [TO BE FILLED]
+## Preflight Gates
 
-> What the project is, who built it, the core problem it solves. Author, license, entry point, minimum runtime versions.
+Cleared in order, with the outcome recorded in `.CLAUDE/CLAUDE-LOG.md`, before the code each gate covers is written.
 
-_Not yet filled — update before the first session._
-
----
-
-## Preflight Gates  [if applicable — TO BE FILLED]
-
-> Numbered gates that must be cleared, in order, before any code is written or changed. Each gate: what must be done, what must be recorded to clear it (and where), and a one-line "why this exists". See `CLAUDE-COMMON.md` → Preflight Gates for the rules and three example gates (understand the existing state, survey the environment, confirm where it will run). Delete this section if the project has no gates.
-
-_Not yet filled — update before the first session._
+1. **Understand the writing data.** *Covers: capture and any model code.* Before touching handwriting samples, write down: **inventory** (who, how many sentences/strokes, device, format), **provenance** (when written — before or after the hand-control loss; tremor in the samples will be learned and reproduced), **coverage gaps** (characters, languages, sizes, connected vs printed writing not present), **consent** (whose data, what it may be used for). **Status: OPEN** — no samples exist yet. *Why: precaution, no incident yet — a model inherits every flaw of its samples, and handwriting is personal data.*
+2. **Survey the environment.** *Covers: model training code.* Run `python tools/compute_survey.py` and record the output; check the training stack actually uses the GPU. **Status: OPEN for training.** Last survey (2026-09-28, in the log): RTX 1000 Ada, 6 GB VRAM, torch not installed — re-run before training. *Why: from CLAUDE-COMMON — a default CPU-only install silently ignores the GPU.*
+3. **Confirm where it runs.** **Status: CLEARED for the printer/planner layer (2026-10-28); OPEN for the model layer.** Recorded: runs on a Windows 11 PC tethered by USB-C to the Ender-3 V3 SE, offline, no cloud needed; the printer has no networking. Artifacts that must leave the machine: stroke JSON and G-code (the printer can also print G-code from microSD with no PC attached — the fallback if the PC cannot stay tethered). Open for models: size vs the 6 GB GPU, and whether a trained writer model must run offline on the person's own machine. *Why: from CLAUDE-COMMON — a platform choice that cannot export its artifacts is a dead end.*
+4. **Calibrate the pen before the first real run.** *Covers: any `--printer` run.* Measure and record in `config.local.yaml`: `pen.offset_x/y` (pen tip relative to the nozzle tip), `pen.down_z` (nozzle Z where the tip just touches the paper), then set `pen.down_z_calibrated: true`; confirm the paper area fits the bed. **Status: OPEN.** Enforced in code (Dev Rule 4). *Why: the sibling project's Z-offset workflow was never bench-tested; a wrong pen Z means either no ink or a pen driven into the bed.*
 
 ---
 
-## Running the System  [TO BE FILLED]
+## Running the System
 
-> Copy-paste-ready commands to start, test, and lint. Virtualenv activation first. Dev/simulation commands separated from hardware/production commands. Any seed-data or one-time setup steps.
+```bat
+:: one-time
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements-dev.txt
 
-_Not yet filled — update before the first session._
+:: dev machine (no hardware needed)
+python -m pytest                                              :: full suite
+python -m py_compile main.py laxthya_ink\*.py laxthya_ink\gcode\*.py laxthya_ink\links\*.py
+python main.py tests\data\sample_strokes.json                 :: simulate (default)
+python main.py tests\data\sample_strokes.json --preview data\out.png --gcode-out data\out.gcode
+python main.py tests\data\sample_strokes.json --dry-run --gcode-out data\out.gcode   :: plan only
 
----
+:: real printer - only after Gate 4 is cleared
+python main.py --printer --ping                               :: connect, M115, print position, exit
+python main.py strokes.json --printer                         :: write for real
+```
 
-## Architecture  [TO BE FILLED]
-
-> Module responsibilities table (file → role). Data flow diagram (ASCII). Threading or async model. Simulation vs real mode and how to switch.
-
-_Not yet filled — update before the first session._
-
----
-
-## Key Modules  [TO BE FILLED]
-
-> One subsection per file or logical group. Public interface: function names, parameters, return types, exceptions raised. Side effects and I/O.
-
-_Not yet filled — update before the first session._
-
----
-
-## Schema Reference  [if applicable — TO BE FILLED]
-
-> Path to DDL/schema file, read-only vs writable, tooling for inspection, annotated schema doc. Delete this section if the project has no data layer.
-
-_Not yet filled — update before the first session._
+Activate the venv before any Python command. `ruff`/`flake8` are not configured yet; `py_compile` + `pytest` run before every commit.
 
 ---
 
-## Key Conventions  [if applicable — TO BE FILLED]
+## Architecture
 
-> Universal row keys, encoded fields with full encode AND decode formulas, sentinel values, current-record pattern, per-tenant partitioning, env vars. Delete if no non-obvious encoding exists.
+| Path | Role |
+|------|------|
+| `main.py` | Thin entry point → `laxthya_ink.cli.main` |
+| `config.yaml` | Every tunable. `config.local.yaml` (git-ignored) deep-merges over it |
+| `laxthya_ink/config.py` | Load + validate config, merge local override |
+| `laxthya_ink/strokes.py` | Stroke data types + JSON loader/validator (the interchange format) |
+| `laxthya_ink/planner.py` | **Pure.** layout → simplify → G-code; bounds checks; `safe_stop_commands` |
+| `laxthya_ink/gcode/util.py` | G-code text helpers (parse, format, N/checksum) |
+| `laxthya_ink/gcode/runner.py` | `GcodeRunner`: stream lines, wait for `ok`, pause/resume/cancel, opt-in resend |
+| `laxthya_ink/links/base.py` | `PrinterLink` interface |
+| `laxthya_ink/links/printer_serial.py` | Real printer over pyserial |
+| `laxthya_ink/links/printer_sim.py` | Fake printer; records the pen path |
+| `laxthya_ink/links/_marlin_rx.py` | Parse Marlin reply lines (pure) |
+| `laxthya_ink/ports.py` | `port: auto` detection by asking each port `M115` |
+| `laxthya_ink/viz.py` | PNG preview of the pen path (matplotlib, lazy, Agg) |
+| `laxthya_ink/cli.py` | Argument parsing, wiring, `execute()` with safe-stop on failure |
+| `tools/compute_survey.py` | Compute survey for Gate 2 |
 
-_Not yet filled — update before the first session._
+```
+ capture (later)      writer model (later)
+        \                  /
+         v                v
+   stroke JSON  ──►  strokes.load_strokes
+                          │  lines of strokes (writing units, y up, baseline y=0)
+                          ▼
+                   planner.plan_job      ← config.yaml (paper, pen, motion, park)
+                   layout → simplify → nozzle coords → G-code
+                          │  Plan(gcode, segments, ...)
+                          ▼
+                   cli.execute → GcodeRunner ──► PrinterLink
+                          │                        ├─ SimPrinter  (dev: records pen_segments)
+                          │ on failure/Ctrl-C      └─ SerialPrinter (USB, Marlin, ok-handshake)
+                          └─► safe_stop_commands (lift pen, park)
+```
 
----
-
-## Data Files  [TO BE FILLED]
-
-> What is stored, where, and whether it is git-tracked. Runtime-generated vs committed files. Files that must never be committed.
-
-_Not yet filled — update before the first session._
-
----
-
-## Platform Constraints  [TO BE FILLED]
-
-> Target OS(es), platform-specific libraries and their guards, hardware dependencies and dev-mode equivalents.
-
-_Not yet filled — update before the first session._
-
----
-
-## Deployment Notes  [if applicable — TO BE FILLED]
-
-> Dev vs deployment environment table, code transfer command, one-time target setup, pre-deploy checklist, hardware smoke test, config/env differences. Delete if no hardware or remote target.
-
-_Not yet filled — update before the first session._
-
----
-
-## Known Technical Debt  [TO BE FILLED]
-
-> Existing rule violations (file + line), temporary workarounds. Do not omit — document so debt is not accidentally perpetuated.
-
-_None recorded yet._
-
----
-
-## Development Rules  [TO BE FILLED]
-
-> Binding architectural rules, each numbered and sourced. Referenced by number in TODO items and commit messages.
-
-_Not yet filled — update before the first session._
+- **Threading:** none yet. `GcodeRunner.run()` is blocking and thread-safe for `pause/resume/cancel`, ready for a future UI worker thread.
+- **Sim vs real:** `--sim` (default) or `--printer`. Both implement `PrinterLink` and raise the same exceptions.
 
 ---
 
-## Project TODO List  [TO BE FILLED]
+## Key Modules
 
-Legend: 🔴 Bug / rule violation  |  🟡 Incomplete feature  |  🟢 Not started  |  ✅ Done
+- **`strokes`** — `Point(x, y, t=None, pressure=None)`, `Stroke(points)`, `Line = list[Stroke]`. `load_strokes(path)` / `parse_lines(data)` → `list[Line]`; raises `StrokeDataError`. Reads one file.
+- **`planner`** — `plan_job(lines, config) -> Plan(gcode, segments, stroke_count, point_count, draw_length_mm)`; `layout`, `simplify`, `dedupe`, `pen_heights(config) -> (down, up, safe)`, `safe_stop_commands(config) -> list[str]`. Raises `WritingAreaError`, `OutOfEnvelopeError`. No I/O.
+- **`GcodeRunner(link, lines, config, lock=None)`** — `run()`, `pause()`, `resume()`, `cancel()`, `.paused/.cancelled/.finished/.sent_lines`. Raises `AckTimeout`, `PrinterError`, `ResendRequested`. Skips blank/comment-only lines. A cancel does **not** move the pen.
+- **`PrinterLink`** — `connect`, `disconnect`, `send_line`, `wait_ok`, `query_state`, `command`. Raises `PrinterConnectionError`, `AckTimeout`, `PrinterError`, `ResendRequested`.
+- **`SimPrinter(pen_contact_z, pen_offset, command_delay)`** — also exposes `.sent`, `.moves`, `.pen_segments` (pen-tip polylines while Z ≤ contact).
+- **`cli.execute(link, gcode, config)`** — runs the job; on any exception/interrupt it sends the safe-stop commands, then re-raises. **`cli.require_calibrated(config)`** raises `PenNotCalibratedError`.
 
-_Not yet filled._
+---
+
+## Key Conventions
+
+- **Stroke coordinates** are *writing units*: x right, **y up**, baseline y = 0, descenders negative. A tablet reports y down — flip it at capture, never in the planner. Mapping to mm: `x_mm = paper.origin_x + x * scale`; `y_mm = baseline_y + y * scale`, where `scale = writing.scale_mm_per_unit` and line `i` (0-based) has `baseline_y = paper.origin_y + paper.height_mm − (i + 1) * writing.line_spacing_mm`.
+- **Pen-tip vs nozzle coordinates:** the paper area, layout and previews are in **pen-tip** bed coordinates. G-code is in **nozzle** coordinates. `pen_tip = nozzle + (pen.offset_x, pen.offset_y)`, so `nozzle = pen_tip − offset`. Worked example: offset (30, −4), pen tip target (40, 208) → nozzle `X10 Y212`.
+- **Z heights:** `pen.down_z` = nozzle Z with the tip on the paper; pen-up = `down_z + lift_mm`; `park.safe_z` must clear pen-up. Example: down 5, lift 3 → up 8, safe 20.
+- **`pen.down_z_calibrated`** is `false` in the committed `config.yaml` and stays false; only `config.local.yaml` may set it true.
+- **Config precedence:** `config.local.yaml` (git-ignored, deep-merged) over `config.yaml`.
+- **Sentinels:** none. `None` for `t`/`pressure` means "not captured".
+- **Secrets:** this project has none today, so there is no `.env`/`.env.example`. Add both the moment an external service is used (CLAUDE-COMMON → Secrets & Credentials).
+
+---
+
+## Data Files
+
+| Path | Tracked | Notes |
+|------|---------|-------|
+| `config.yaml` | yes | Defaults and placeholders only |
+| `config.local.yaml` | **no** | Real COM port, measured pen offset / Z |
+| `tests/data/sample_strokes.json` | yes | Tiny synthetic fixture (not anyone's handwriting) |
+| `data/` | **no** | Generated G-code and previews; **all handwriting samples and trained models go here (Dev Rule 7)** |
+
+---
+
+## Platform Constraints
+
+- Developed on Windows 11; the serial code is OS-neutral (`COMx` vs `/dev/ttyUSB0` comes from config). Not yet run on Linux/Raspberry Pi.
+- `pyserial` and `matplotlib` are imported lazily, so the planner, sim and tests do not need them at import time.
+- Hardware: Ender-3 V3 SE, Marlin, USB-C, 115200 baud, no networking. Dev-mode equivalent: `SimPrinter`.
+
+---
+
+## Deployment Notes
+
+| | Dev machine | Deployment target |
+|--|-------------|-------------------|
+| OS | Windows 11 | Same PC, tethered to the printer |
+| Python | 3.13 (`.venv`) | same |
+| Hardware | none — `SimPrinter` | Ender-3 V3 SE + pen mount |
+| Entry point | `python main.py file.json` | `python main.py file.json --printer` |
+
+- **Transfer:** same machine (or `git pull`); no remote device.
+- **Pre-deploy checklist (dev machine):** `pytest` green; `python main.py tests\data\sample_strokes.json --preview ...` and inspect the PNG; planned G-code reviewed (`--dry-run --gcode-out`); Gate 4 cleared.
+- **Hardware impact of a change:** state which parts touch the serial port, Z heights or the pen mount versus pure logic (CLAUDE-COMMON → Deployment Model).
+- **Hardware smoke test, in order:** (1) `python main.py --printer --ping`; (2) a dry-run job with the pen **removed**, watching the moves; (3) the pen in, `pen.down_z` set a few mm too high, then lowered in small steps; (4) the sample strokes on paper.
+- **Dev vs target config differences:** `printer.port`, `pen.offset_*`, `pen.down_z`, `pen.down_z_calibrated`, `paper.*` — all in `config.local.yaml`.
+
+---
+
+## Known Technical Debt
+
+- **Pause leaves the pen where it is.** `GcodeRunner.pause()` only stops sending lines; if the pen is down the ink bleeds, and nothing lifts it. Needs a pause-lift (Dev Rule 9).
+- **Unverified in this repo on hardware:** `SerialPrinter`/`ports.find_printer` (verified only in the sibling project), `gcode.use_line_numbers` resend, and `G28` followed by the first pen move with a pen mounted.
+- **Z-offset calibration workflow does not exist yet** — the sibling project's paper-test dialog was never bench-tested and was not ported (`TODO.md`).
+- **`t` and `pressure` are loaded but unused** by the planner.
+- **Sim homes to Z = 0**, a stand-in; `SimPrinter` deliberately does not count homing as drawing.
+- **No linter configured** (`ruff` recommended; flagged per CLAUDE-COMMON).
+
+---
+
+## Development Rules
+
+1. **Dev machine first, hardware last** (CLAUDE-COMMON → Deployment Model). State which parts of a change touch hardware.
+2. **Every driver has a simulated equivalent** producing the same data shape and exceptions. The sim also strips `N<n>…*<checksum>` like real Marlin.
+3. **No hardcoded parameters** — ports, feeds, heights, paper size, tolerances live in `config.yaml`.
+4. **A real-printer run is refused until `pen.down_z_calibrated` is true** (`cli.require_calibrated`). Never set it true in the committed config.
+5. **The planner is pure and checks everything before motion:** paper area, machine volume, Z limits, `pen.min_z`. Nothing is sent to a printer if planning raises.
+6. **Never send heater, extrusion or bed-mesh commands** (`M104/M109/M140/M190`, `E` words, `G29`, `M420`). A pen needs none; the stock firmware also drops mesh compensation after every `G28`, which is irrelevant here.
+7. **Handwriting samples are personal data:** only under git-ignored `data/`, never committed, never sent to an external service without the owner's explicit approval.
+8. **Stroke coordinates are y-up with the baseline at y = 0**; fix orientation at capture.
+9. **On failure, interrupt or cancel, lift the pen and park** (`safe_stop_commands`). *(Cancel and pause paths in the runner still owe this — see Technical Debt.)*
+
+---
+
+## Project TODO List
+
+See `TODO.md` — the tracker. Legend: 🔴 Bug / rule violation | 🟡 Incomplete feature | 🟢 Not started | ✅ Done
 
 ---
 
 ## User Rules
 
-> Copy **Standard User Rules** from `CLAUDE-COMMON.md` verbatim here, then copy all sections from `PROJ_STARTER.md` below those. Add project-specific overrides at the bottom, clearly labelled.
-
 See `CLAUDE-COMMON.md` → Standard User Rules and `PROJ_STARTER.md` for the full rule set.
 
 ### Project-Specific Overrides
 
-_None — add below as needed._
+- **Log file location:** this repo keeps the session log at `.CLAUDE/CLAUDE-LOG.md` (not root `Claude_log.md`), and `TODO.md` at the root. Append a dated entry every session.
+- **Project plan** lives in `docs/PROJECT_PLAN.md` (no separate `project/` folder).

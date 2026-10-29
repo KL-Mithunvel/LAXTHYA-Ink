@@ -1,5 +1,25 @@
 # Claude Log
 
+## 2026-10-29 — Grill session on the capture and learning design
+- Owner asked to be grilled one question at a time (`.CLAUDE/skill/grill-me`). Plan: collect a dataset by having people write a default prompt text, learn from it, then build the generator; the dataset must cover letter combinations/joins (cursive).
+- Decisions (recorded in the Decisions table of `docs/PROJECT_PLAN.md`): online strokes only; iPad + stylus (paper-texture protector optional); capture app is a Safari web app with a Python backend. Record answers as we go.
+- Plan impact: scan/photo route dropped; Phase 3 capture will be a web app.
+- More decisions (all in the Decisions table): tiered coverage (core first); script = English + digits + full Greek alphabet + math symbols, then Tamil added; writers collected one at a time, output conditioned to one chosen writer only; first writers are healthy; old-paper recovery deferred to a later research phase.
+- Later decisions (Decisions table): hybrid model, library first; styles natural + cursive + print with full coverage for natural only; local-only data with written consent; success judged by automatic checks and a blind human test; A5 and smaller pages; capture stays a Safari web app with a signals test page first; device is an iPad Pro M4 (Pencil Pro).
+- Storage confirmed: every raw pen sample in SQLite plus a compressed JSON backup per session; strokes derived.
+- Also decided: spring-loaded fineliner holder (printable); layout scope is plain text, then super/subscripts, then full equations, all in v1 in that order.
+- Consequence flagged: the 20-30 min core estimate no longer holds with full Greek and Tamil; re-estimate after prompt design, likely several short sittings.
+
+## 2026-10-28 — Start LAXTHYA-Ink: plotter pipeline on the dev machine
+- Read the sibling Ender-3 V3 SE magnet-embed project (local copy of `KL-Mithunvel/Creality-Ender-3-V3-SE-`) for how printer control works: serial at 115200, DTR low, `M115` handshake, one line then wait for `ok`, `busy`/`wait`/`resend`/`error` handling, sim twin, runner, port auto-detect.
+- Filled `.CLAUDE/CLAUDE.md` for this project (overview, four preflight gates with status, architecture, modules, conventions, deployment, debt, rules 1-9). Kept the Branch Policy section unchanged apart from noting `main` now also hosts this project.
+- Gate outcomes: Gate 3 (where it runs) cleared for the printer/planner layer — Windows 11 PC tethered by USB-C, offline; model layer still open. Gates 1, 2 and 4 are OPEN (no samples yet; training survey not re-run; pen uncalibrated).
+- Added `docs/PROJECT_PLAN.md` (five phases, decisions, open questions, printer-control reference).
+- Built Phase 1 in `laxthya_ink/`: config + validation, stroke format/loader, pure planner, runner, `PrinterLink` + serial + sim (sim records the pen path), ports, preview, CLI; `config.yaml`; `requirements*.txt`; `pyproject.toml`; 111 tests (all pass); `.venv` created. Ran the CLI on `tests/data/sample_strokes.json` and inspected the preview PNG: L, box, dot and diagonal land where planned.
+- Decisions: Z-only pen lift; no bed mesh / heater / extrusion commands; `pen.down_z_calibrated` stays false in the committed config and gates `--printer`; safe-stop (lift + park) on failure or interrupt; stroke coordinates y-up, baseline 0.
+- Not done: nothing run on real hardware; pause does not lift the pen (debt); no `.env.example` (no secrets yet, noted in CLAUDE.md); nothing committed yet.
+- Housekeeping: `.gitignore` now ignores `config.local.yaml`. `.CLAUDE/CLAUDE_INDEX.md` lists the new files.
+
 ## 2026-09-28 — Record the never-merge branch policy
 - Owner clarified that `main` and `machine-vision` are separate personal copies and are never to be merged. Added a "Branch Policy" section (marked repo-specific, not to be copied into new projects) at the top of `.CLAUDE/CLAUDE.md` on `main`, and matching notices on `machine-vision`.
 - Cancelled the TODO item to merge `main` into `machine-vision`; recorded the reason there. The earlier merge of `origin/main` into `main` is unaffected — that was the same branch on the remote.

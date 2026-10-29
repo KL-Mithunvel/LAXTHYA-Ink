@@ -20,6 +20,14 @@ Master index of all documents in this `.CLAUDE/` library. Every new project-base
 | [TODO.md](../TODO.md) | Task tracker — in progress, done, not started | Every session to pick up where things left off |
 | [CLAUDE-LOG.md](CLAUDE-LOG.md) | Session log — dated entries of what was done and why | Every session start; append before closing |
 
+## Project: LAXTHYA-Ink
+
+| Path | Role | Read when |
+|------|------|-----------|
+| [../docs/PROJECT_PLAN.md](../docs/PROJECT_PLAN.md) | Phased plan, decisions, open questions, printer-control reference | Planning or starting a phase |
+| [../README.md](../README.md) | Quick start and how it works | First look |
+| [../config.yaml](../config.yaml) | Every tunable (paper, pen, motion, park, sim) | Changing behaviour or calibrating |
+
 ## Tooling and Defaults
 
 | Path | Role | Read when |

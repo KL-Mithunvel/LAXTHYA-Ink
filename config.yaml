@@ -1,0 +1,66 @@
+# Default configuration. Every tunable lives here (CLAUDE-COMMON: no hardcoded parameters).
+#
+# Machine-specific values (real COM port, the MEASURED pen offset and pen-down Z)
+# belong in a git-ignored config.local.yaml next to this file; it is deep-merged
+# over these defaults at load time. Do not commit a real port or a tuned Z here.
+
+printer:
+  port: auto            # 'auto' = find it by asking each port (M115); or COM3 / /dev/ttyUSB0
+  baud: 115200          # Ender-3 V3 SE
+  ack_timeout_s: 30     # no `ok` and no busy/wait for this long -> AckTimeout
+  connect_settle_s: 2.0 # wait after opening the port before the M115 handshake
+
+# Ender-3 V3 SE build volume (mm). Nozzle targets are checked against it.
+machine:
+  x_max: 220
+  y_max: 220
+  z_max: 250
+
+# Writing area on the paper, in PEN-TIP bed coordinates (mm). Origin is the
+# bottom-left corner of the area; y grows toward the back of the bed.
+paper:
+  origin_x: 40.0
+  origin_y: 40.0
+  width_mm: 140.0
+  height_mm: 180.0
+
+pen:
+  # Pen tip position relative to the nozzle tip (mm): pen_tip = nozzle + offset.
+  # MEASURE THIS on the real machine and override in config.local.yaml.
+  offset_x: 0.0
+  offset_y: 0.0
+  # Nozzle Z at which the pen tip just touches the paper.
+  # PROVISIONAL placeholder - not touching the paper. Measure it, put it in
+  # config.local.yaml, and only then set down_z_calibrated: true (Dev Rule 4).
+  down_z: 5.0
+  down_z_calibrated: false
+  lift_mm: 3.0          # pen-up height above down_z while travelling between strokes
+  min_z: 0.0            # the planner never commands a Z below this
+  down_dwell_ms: 0      # pause after lowering the pen (0 = none); lets a spring pen settle
+
+writing:
+  scale_mm_per_unit: 1.0     # stroke-file units -> mm (the writer's size, scaled)
+  line_spacing_mm: 12.0      # baseline-to-baseline distance
+  simplify_tolerance_mm: 0.05   # Ramer-Douglas-Peucker; 0 disables
+  min_point_spacing_mm: 0.02    # drop points closer than this to the previous kept point
+
+motion:
+  draw_feed: 1200       # mm/min, pen down
+  travel_feed: 6000     # mm/min, pen up
+  z_feed: 600           # mm/min, pen lift / lower
+
+park:
+  x: 5.0                # nozzle position at the end of a job (or after a stop)
+  y: 5.0
+  safe_z: 20.0          # Z for homing exit, parking and safe-stop (must clear pen_up Z)
+
+start:
+  home: true            # send G28 at the start of a job
+
+gcode:
+  use_line_numbers: false   # N<n>/checksum + resend buffer instead of plain lines (unverified)
+
+# Simulated printer (dev machine only).
+sim:
+  contact_tolerance_mm: 0.001   # Z within this of pen.down_z counts as pen-on-paper
+  command_delay_s: 0.0          # sleep per line; non-zero makes a sim run take real time

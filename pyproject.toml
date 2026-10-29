@@ -1,0 +1,13 @@
+[project]
+name = "laxthya-ink"
+version = "0.1.0"
+description = "Pen-plotting handwriting on a Creality Ender-3 V3 SE, in the writer's own hand"
+requires-python = ">=3.12"
+dependencies = ["pyyaml>=6,<7", "pyserial>=3.5,<4", "matplotlib>=3.8,<4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
