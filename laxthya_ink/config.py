@@ -27,6 +27,13 @@ _NUMERIC_KEYS: tuple[tuple[str, str], ...] = (
     ("motion", "draw_feed"), ("motion", "travel_feed"), ("motion", "z_feed"),
     ("park", "x"), ("park", "y"), ("park", "safe_z"),
     ("sim", "contact_tolerance_mm"), ("sim", "command_delay_s"),
+    ("capture", "port"), ("capture", "max_upload_mb"),
+)
+
+#: (section, key) pairs that must be present and a non-empty string.
+_STRING_KEYS: tuple[tuple[str, str], ...] = (
+    ("printer", "port"),
+    ("capture", "host"), ("capture", "probe_dir"),
 )
 
 #: (section, key) pairs that must be present and boolean.
@@ -44,6 +51,7 @@ _POSITIVE_KEYS: tuple[tuple[str, str], ...] = (
     ("pen", "lift_mm"),
     ("writing", "scale_mm_per_unit"), ("writing", "line_spacing_mm"),
     ("motion", "draw_feed"), ("motion", "travel_feed"), ("motion", "z_feed"),
+    ("capture", "port"), ("capture", "max_upload_mb"),
 )
 
 #: numeric keys that must be >= 0
@@ -72,9 +80,10 @@ def _require(config: dict, section: str, key: str) -> Any:
 
 
 def _validate(config: dict) -> None:
-    port = _require(config, "printer", "port")
-    if not isinstance(port, str) or not port.strip():
-        raise ValueError(f"config printer.port must be a non-empty string, got {port!r}")
+    for section, key in _STRING_KEYS:
+        value = _require(config, section, key)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"config {section}.{key} must be a non-empty string, got {value!r}")
 
     for section, key in _NUMERIC_KEYS:
         value = _require(config, section, key)

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Signal Probe</title>
+<style>
+  :root { --bg: #fafaf7; --fg: #1d1d1b; --muted: #6b6b66; --line: #d8d8d0; --accent: #1f5f8b; --panel: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17171a; --fg: #ececea; --muted: #9a9a94; --line: #34343a; --accent: #6db3e0; --panel: #202024; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 15px/1.4 -apple-system, system-ui, sans-serif; overscroll-behavior: none; }
+  body { display: grid; grid-template-rows: auto 1fr; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; }
+  #status { color: var(--muted); font-variant-numeric: tabular-nums; flex: 1 1 260px; }
+  button { font: inherit; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel); color: var(--fg); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { display: grid; grid-template-columns: 1fr 330px; min-height: 0; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; } }
+  #pad { position: relative; min-height: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+    touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    background: repeating-linear-gradient(transparent, transparent 47px, var(--line) 48px); }
+  aside { border-left: 1px solid var(--line); padding: 12px 16px; overflow: auto; background: var(--panel); }
+  aside h2 { font-size: 13px; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  aside h2:first-child { margin-top: 0; }
+  ol { margin: 0; padding-left: 20px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  td, th { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--line); }
+  td.num { text-align: right; }
+  .on { color: #1c8a4a; font-weight: 600; } .off { color: var(--muted); }
+  pre { white-space: pre-wrap; font-size: 12px; margin: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Signal Probe</h1>
+  <div id="status">Draw with the Apple Pencil.</div>
+  <button id="clear">Clear</button>
+  <button id="send" class="primary">Send to laptop</button>
+  <button id="save">Download JSON</button>
+</header>
+<main>
+  <div id="pad"><canvas id="c"></canvas></div>
+  <aside>
+    <h2>Do these, in order</h2>
+    <ol>
+      <li>Hold the Pencil just above the screen and move it, without touching.</li>
+      <li>Write a few words in your normal hand.</li>
+      <li>Draw a line pressing lightly, then hard.</li>
+      <li>Tilt the Pencil flat, then upright, while drawing.</li>
+      <li>Rotate (roll) the Pencil barrel while it touches the screen.</li>
+      <li>Squeeze the Pencil Pro barrel.</li>
+      <li>Press <b>Send to laptop</b>.</li>
+    </ol>
+    <h2>What arrives (live)</h2>
+    <table id="fields"></table>
+    <h2>Browser features</h2>
+    <div id="features"></div>
+    <h2>Laptop's verdict</h2>
+    <pre id="report">(not sent yet)</pre>
+  </aside>
+</main>
+<script>
+"use strict";
+// Every numeric PointerEvent field we want to know about. The page records all of
+// them and lets the laptop decide which ones carry real information.
+const FIELDS = ["pressure", "tiltX", "tiltY", "altitudeAngle", "azimuthAngle",
+                "twist", "width", "height", "tangentialPressure"];
+const FEATURES = {
+  coalescedEvents: typeof PointerEvent !== "undefined" && "getCoalescedEvents" in PointerEvent.prototype,
+  predictedEvents: typeof PointerEvent !== "undefined" && "getPredictedEvents" in PointerEvent.prototype,
+  rawUpdate: "onpointerrawupdate" in window,
+};
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const events = [];
+const live = {};          // "pen/contact" -> {field -> {min, max, set}}
+const intervals = [];     // recent pen contact move intervals (ms)
+let lastContactT = null;
+let last = null;          // last drawn point
+
+function fit() {
+  const r = canvas.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  canvas.width = Math.round(r.width * d);
+  canvas.height = Math.round(r.height * d);
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+  ctx.lineCap = "round";
+  ctx.strokeStyle = getComputedStyle(document.body).color;
+}
+window.addEventListener("resize", fit);
+fit();
+
+function snapshot(e, kind, coalesced) {
+  const ev = { k: kind, t: e.timeStamp, x: e.clientX, y: e.clientY,
+               pt: e.pointerType, b: e.buttons, id: e.pointerId, c: coalesced ? 1 : 0 };
+  for (const f of FIELDS) { if (typeof e[f] === "number") ev[f] = e[f]; }
+  return ev;
+}
+
+function track(ev) {
+  const group = ev.k === "pointermove" ? (ev.b === 0 ? "hover" : "contact") : "contact";
+  const key = ev.pt + "/" + group;
+  const g = (live[key] = live[key] || { n: 0, f: {} });
+  g.n++;
+  for (const f of FIELDS) {
+    if (typeof ev[f] !== "number") continue;
+    const s = (g.f[f] = g.f[f] || { min: Infinity, max: -Infinity, set: new Set() });
+    s.min = Math.min(s.min, ev[f]); s.max = Math.max(s.max, ev[f]);
+    if (s.set.size < 50) s.set.add(Math.round(ev[f] * 1e4));
+  }
+  if (ev.k === "pointermove" && ev.b > 0 && ev.pt === "pen") {
+    if (lastContactT !== null && ev.t > lastContactT) {
+      intervals.push(ev.t - lastContactT);
+      if (intervals.length > 300) intervals.shift();
+    }
+    lastContactT = ev.t;
+  }
+}
+
+function median(a) { const s = [...a].sort((x, y) => x - y); return s.length ? s[s.length >> 1] : null; }
+
+function render() {
+  const rows = ["<tr><th>group</th><th>n</th><th>varies</th></tr>"];
+  for (const [key, g] of Object.entries(live)) {
+    const varying = FIELDS.filter(f => g.f[f] && g.f[f].set.size > 1);
+    rows.push(`<tr><td>${key}</td><td class="num">${g.n}</td><td>${varying.length ? varying.map(f => `<span class="on">${f}</span>`).join(", ") : '<span class="off">none</span>'}</td></tr>`);
+  }
+  document.getElementById("fields").innerHTML = rows.join("");
+  const m = median(intervals);
+  statusEl.textContent = `${events.length} events` + (m ? ` · pen-down ≈ ${(1000 / m).toFixed(0)} Hz (${m.toFixed(2)} ms)` : "");
+}
+
+function draw(ev) {
+  if (ev.pt === "touch") return;
+  if (ev.k === "pointerdown") { last = ev; return; }
+  if (ev.k === "pointermove" && ev.b > 0 && last) {
+    // Event coordinates are viewport-relative; the canvas sits below the header,
+    // so subtract its on-screen position or the ink lands offset from the pen.
+    const r = canvas.getBoundingClientRect();
+    ctx.lineWidth = 1 + 6 * (ev.pressure || 0.3);
+    ctx.beginPath(); ctx.moveTo(last.x - r.left, last.y - r.top); ctx.lineTo(ev.x - r.left, ev.y - r.top); ctx.stroke();
+    last = ev;
+  } else if (ev.k === "pointerup" || ev.k === "pointercancel") { last = null; }
+}
+
+function onPointer(e) {
+  // Apple delivers several samples per frame; the coalesced list unpacks them.
+  const list = e.type === "pointermove" && FEATURES.coalescedEvents ? e.getCoalescedEvents() : [];
+  const batch = list.length > 1 ? list : [e];
+  for (const item of batch) {
+    const ev = snapshot(item, e.type, batch !== list ? false : true);
+    events.push(ev); track(ev); draw(ev);
+  }
+  e.preventDefault();
+}
+for (const t of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) {
+  canvas.addEventListener(t, onPointer, { passive: false });
+}
+if (FEATURES.rawUpdate) {
+  canvas.addEventListener("pointerrawupdate", e => { events.push(snapshot(e, "pointerrawupdate", false)); });
+}
+setInterval(render, 250);
+for (const t of ["contextmenu", "gesturestart", "selectstart"]) document.addEventListener(t, e => e.preventDefault());
+
+document.getElementById("features").innerHTML = Object.entries(FEATURES)
+  .map(([k, v]) => `<div><span class="${v ? "on" : "off"}">${v ? "yes" : "no"}</span> ${k}</div>`).join("");
+
+function payload() {
+  return {
+    meta: {
+      userAgent: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints,
+      screen: `${screen.width}x${screen.height}`, devicePixelRatio: window.devicePixelRatio,
+      viewport: `${innerWidth}x${innerHeight}`, features: FEATURES, recordedAt: new Date().toISOString(),
+      canvasRect: (r => ({ left: r.left, top: r.top, width: r.width, height: r.height }))(canvas.getBoundingClientRect()),
+    },
+    events,
+  };
+}
+
+document.getElementById("clear").onclick = () => {
+  events.length = 0; intervals.length = 0; lastContactT = null; last = null;
+  for (const k of Object.keys(live)) delete live[k];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  document.getElementById("report").textContent = "(not sent yet)";
+};
+
+document.getElementById("send").onclick = async () => {
+  const out = document.getElementById("report");
+  if (!events.length) { out.textContent = "Nothing recorded yet - draw something first."; return; }
+  out.textContent = "Sending...";
+  try {
+    const r = await fetch("/api/probe", { method: "POST", headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify(payload()) });
+    const j = await r.json();
+    out.textContent = r.ok ? j.report : `Error ${r.status}: ${j.detail}`;
+  } catch (err) { out.textContent = "Could not reach the laptop: " + err; }
+};
+
+document.getElementById("save").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(payload())], { type: "application/json" }));
+  a.download = "probe.json"; a.click();
+};
+</script>
+</body>
+</html>

@@ -64,3 +64,10 @@ gcode:
 sim:
   contact_tolerance_mm: 0.001   # Z within this of pen.down_z counts as pen-on-paper
   command_delay_s: 0.0          # sleep per line; non-zero makes a sim run take real time
+
+# Handwriting capture server (the iPad web app talks to this).
+capture:
+  host: 0.0.0.0         # listen on the LAN so the iPad can reach this laptop; local network only
+  port: 8000
+  probe_dir: data/probe # where signal-probe uploads are saved (git-ignored); relative to the repo root
+  max_upload_mb: 20     # reject larger uploads

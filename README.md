@@ -2,7 +2,7 @@
 
 A pen mounted on a Creality Ender-3 V3 SE that writes **in a person's own handwriting** — for example for someone who has recently lost control of their writing hand. A longer-term goal is to learn a writer's style automatically from their real samples.
 
-**Status:** the plotting pipeline works on the dev machine against a simulated printer (111 tests). It has not yet run on the real printer, and handwriting capture and the learning models are not built. See `docs/PROJECT_PLAN.md`.
+**Status:** the plotting pipeline works on the dev machine against a simulated printer, and an iPad signal probe is built (136 tests). It has not yet run on the real printer, and handwriting capture and the learning models are not built. See `docs/PROJECT_PLAN.md`.
 
 ## Quick start
 
@@ -18,6 +18,17 @@ python main.py tests\data\sample_strokes.json --preview data\out.png
 That plans the sample strokes, streams them to a simulated printer with a pen, and saves the path the simulated pen drew.
 
 More modes: `--dry-run --gcode-out job.gcode` (plan only), `--printer` (real hardware — refused until the pen is calibrated, see below), `--printer --ping` (connect and print position).
+
+## iPad signal probe
+
+Finds out what your iPad and Apple Pencil really report to Safari (pressure, tilt, roll, hover, sample rate) before the real capture app is built.
+
+```bat
+.venv\Scripts\activate
+python -m laxthya_ink.capture
+```
+
+Open the printed `http://<laptop-ip>:8000/` on the iPad (same Wi-Fi), follow the steps on the page, press **Send to laptop**. The verdict appears on the page and is saved under `data/probe/`. Stop the server with Ctrl+C. It has no login, so run it only on a network you trust.
 
 ## How it works
 

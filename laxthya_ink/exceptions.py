@@ -43,6 +43,10 @@ class StrokeDataError(InkError):
     """A stroke file is missing fields, malformed, or holds non-finite numbers."""
 
 
+class ProbeDataError(InkError):
+    """A signal-probe upload is malformed (not JSON, no events, bad event fields)."""
+
+
 class WritingAreaError(InkError):
     """The strokes, once laid out, fall outside the configured paper area."""
 

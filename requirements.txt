@@ -3,3 +3,5 @@
 pyyaml>=6,<7
 pyserial>=3.5,<4
 matplotlib>=3.8,<4    # pen-path preview (laxthya_ink/viz.py); imported lazily
+fastapi>=0.110,<1     # capture server (laxthya_ink/capture)
+uvicorn>=0.29,<1      # serves it

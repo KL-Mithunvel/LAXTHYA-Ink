@@ -1,5 +1,13 @@
 # Claude Log
 
+## 2026-10-30 — First probe result from the iPad Pro M4
+- Ran the capture server; owner uploaded one probe (`data/probe/probe-20261030-123914.json`). Results recorded in `docs/PROJECT_PLAN.md` -> Probe result 1: pressure, tilt, altitude, azimuth and hover presence all work; roll and tangential pressure constant 0; no hover height; ~106 samples/s with frame-quantised timestamps; `getCoalescedEvents` absent in Safari 26.5.
+- Fixed two bugs in my own code: (1) `probe.py` reported 59 Hz because it only used gaps between distinct timestamps - now counts every in-stroke sample (106 Hz) and flags timestamp quantisation; two new tests (138 pass). (2) `probe.html` drew ink offset from the pen (viewport coordinates on a canvas below the header) - now subtracts the canvas rect, which is also saved in the upload meta. Recorded coordinates were never affected.
+- Restarted the capture server so the corrected analysis is live; the page fix is served from disk.
+- Second probe (`probe-20261030-125553`): same picture, ~115 samples/s; roll still constant 0 (treated as unavailable in Safari); squeeze invisible (buttons only 0/1); touch-only cancels (palm) so the capture app must ignore touch. Recorded as Probe result 2 in the plan.
+- DECIDED (owner): build the real capture app on the web route.
+- (resolved) Was open: is ~106 Hz without roll/hover-height enough (stay web), or go native for 240 Hz, roll, squeeze and hover height? Also re-test roll once.
+
 ## 2026-10-29 — Grill session on the capture and learning design
 - Owner asked to be grilled one question at a time (`.CLAUDE/skill/grill-me`). Plan: collect a dataset by having people write a default prompt text, learn from it, then build the generator; the dataset must cover letter combinations/joins (cursive).
 - Decisions (recorded in the Decisions table of `docs/PROJECT_PLAN.md`): online strokes only; iPad + stylus (paper-texture protector optional); capture app is a Safari web app with a Python backend. Record answers as we go.
@@ -8,6 +16,10 @@
 - Later decisions (Decisions table): hybrid model, library first; styles natural + cursive + print with full coverage for natural only; local-only data with written consent; success judged by automatic checks and a blind human test; A5 and smaller pages; capture stays a Safari web app with a signals test page first; device is an iPad Pro M4 (Pencil Pro).
 - Storage confirmed: every raw pen sample in SQLite plus a compressed JSON backup per session; strokes derived.
 - Also decided: spring-loaded fineliner holder (printable); layout scope is plain text, then super/subscripts, then full equations, all in v1 in that order.
+- Committed Phase 1 + plan as 64e78ba (main, not pushed).
+- Built the signal probe: `laxthya_ink/capture/` (`probe.py` analysis, `server.py` FastAPI, `__main__.py`, `static/probe.html`), `capture:` config section, `ProbeDataError`, FastAPI/uvicorn/httpx requirements; 136 tests pass; smoke-tested the real server on localhost (GET /, health, upload, report). The smoke-test files were deleted from `data/probe/`.
+- Finding while building: Pointer Events have no hover-distance field, so hover height (z) cannot come from Safari at all (only hover presence). Corrected in the plan. Owner wanted z; this needs a native app.
+- Open: `httpx` deprecation warning from Starlette's TestClient (suggests httpx2) - not changed, needs owner's decision.
 - Consequence flagged: the 20-30 min core estimate no longer holds with full Greek and Tamil; re-estimate after prompt design, likely several short sittings.
 
 ## 2026-10-28 — Start LAXTHYA-Ink: plotter pipeline on the dev machine

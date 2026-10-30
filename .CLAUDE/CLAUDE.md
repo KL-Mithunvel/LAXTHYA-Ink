@@ -36,7 +36,7 @@ This repo holds **two independent copies** of the template, kept as separate bra
 
 ### Current status (2026-10-28)
 
-Phase 1 software is done and tested on the dev machine (111 tests): stroke file → layout → G-code → simulated printer → pen-path preview. **Nothing has run on the real printer yet.** No handwriting capture and no learning model exist yet.
+Phase 1 software is done and tested on the dev machine (136 tests): stroke file → layout → G-code → simulated printer → pen-path preview. **Nothing has run on the real printer yet.** The iPad **signal probe** (capture server + test page) is built and waiting for a run on the iPad Pro M4; no real capture app and no learning model exist yet. Design decisions from the grill session are in `docs/PROJECT_PLAN.md`.
 
 ---
 
@@ -69,6 +69,9 @@ python main.py tests\data\sample_strokes.json --dry-run --gcode-out data\out.gco
 :: real printer - only after Gate 4 is cleared
 python main.py --printer --ping                               :: connect, M115, print position, exit
 python main.py strokes.json --printer                         :: write for real
+
+:: iPad signal probe (capture server on the LAN; Ctrl+C to stop)
+python -m laxthya_ink.capture                                 :: prints the URL to open on the iPad
 ```
 
 Activate the venv before any Python command. `ruff`/`flake8` are not configured yet; `py_compile` + `pytest` run before every commit.
@@ -93,6 +96,10 @@ Activate the venv before any Python command. `ruff`/`flake8` are not configured 
 | `laxthya_ink/ports.py` | `port: auto` detection by asking each port `M115` |
 | `laxthya_ink/viz.py` | PNG preview of the pen path (matplotlib, lazy, Agg) |
 | `laxthya_ink/cli.py` | Argument parsing, wiring, `execute()` with safe-stop on failure |
+| `laxthya_ink/capture/probe.py` | **Pure.** Analyse a signal-probe upload: which pen fields vary, hover, sample rate |
+| `laxthya_ink/capture/server.py` | FastAPI app: serves the probe page, receives uploads into `data/probe/` |
+| `laxthya_ink/capture/static/probe.html` | The iPad page (vanilla JS): records every pointer event with every field |
+| `laxthya_ink/capture/__main__.py` | `python -m laxthya_ink.capture` - runs the server, prints the LAN URL |
 | `tools/compute_survey.py` | Compute survey for Gate 2 |
 
 ```
@@ -122,6 +129,7 @@ Activate the venv before any Python command. `ruff`/`flake8` are not configured 
 - **`strokes`** — `Point(x, y, t=None, pressure=None)`, `Stroke(points)`, `Line = list[Stroke]`. `load_strokes(path)` / `parse_lines(data)` → `list[Line]`; raises `StrokeDataError`. Reads one file.
 - **`planner`** — `plan_job(lines, config) -> Plan(gcode, segments, stroke_count, point_count, draw_length_mm)`; `layout`, `simplify`, `dedupe`, `pen_heights(config) -> (down, up, safe)`, `safe_stop_commands(config) -> list[str]`. Raises `WritingAreaError`, `OutOfEnvelopeError`. No I/O.
 - **`GcodeRunner(link, lines, config, lock=None)`** — `run()`, `pause()`, `resume()`, `cancel()`, `.paused/.cancelled/.finished/.sent_lines`. Raises `AckTimeout`, `PrinterError`, `ResendRequested`. Skips blank/comment-only lines. A cancel does **not** move the pen.
+- **`capture.probe.summarise(payload) -> dict`** / **`format_report(summary)`** — raises `ProbeDataError`. **`capture.server.create_app(config, probe_dir=None)`** — `GET /`, `GET /api/health`, `POST /api/probe` (400 bad JSON, 413 too large, 422 bad events); writes `probe-<timestamp>.json/.txt` under `capture.probe_dir`, server-chosen names only.
 - **`PrinterLink`** — `connect`, `disconnect`, `send_line`, `wait_ok`, `query_state`, `command`. Raises `PrinterConnectionError`, `AckTimeout`, `PrinterError`, `ResendRequested`.
 - **`SimPrinter(pen_contact_z, pen_offset, command_delay)`** — also exposes `.sent`, `.moves`, `.pen_segments` (pen-tip polylines while Z ≤ contact).
 - **`cli.execute(link, gcode, config)`** — runs the job; on any exception/interrupt it sends the safe-stop commands, then re-raises. **`cli.require_calibrated(config)`** raises `PenNotCalibratedError`.
@@ -147,6 +155,7 @@ Activate the venv before any Python command. `ruff`/`flake8` are not configured 
 | `config.yaml` | yes | Defaults and placeholders only |
 | `config.local.yaml` | **no** | Real COM port, measured pen offset / Z |
 | `tests/data/sample_strokes.json` | yes | Tiny synthetic fixture (not anyone's handwriting) |
+| `data/probe/` | **no** | Signal-probe uploads (`probe-*.json` raw events, `probe-*.txt` verdict) |
 | `data/` | **no** | Generated G-code and previews; **all handwriting samples and trained models go here (Dev Rule 7)** |
 
 ---
@@ -183,6 +192,8 @@ Activate the venv before any Python command. `ruff`/`flake8` are not configured 
 - **Z-offset calibration workflow does not exist yet** — the sibling project's paper-test dialog was never bench-tested and was not ported (`TODO.md`).
 - **`t` and `pressure` are loaded but unused** by the planner.
 - **Sim homes to Z = 0**, a stand-in; `SimPrinter` deliberately does not count homing as drawing.
+- **`httpx` deprecation warning in tests:** Starlette's `TestClient` warns that using `httpx` is deprecated and suggests `httpx2`. Not changed yet - needs the owner's decision (deprecated-API rule). Affects `tests/test_capture_server.py` only.
+- **The capture server listens on the LAN (`capture.host: 0.0.0.0`) with no authentication.** Acceptable for a home network while it runs; do not run it on a shared or public network.
 - **No linter configured** (`ruff` recommended; flagged per CLAUDE-COMMON).
 
 ---
