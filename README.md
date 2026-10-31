@@ -30,6 +30,15 @@ python -m laxthya_ink.capture
 
 Open the printed `http://<laptop-ip>:8000/` on the iPad (same Wi-Fi), follow the steps on the page, press **Send to laptop**. The verdict appears on the page and is saved under `data/probe/`. Stop the server with Ctrl+C. It has no login, so run it only on a network you trust.
 
+## Capture app and monitor
+
+```bat
+.venv\Scripts\activate
+python -m laxthya_ink.capture
+```
+
+On the iPad (same Wi-Fi), open the **writing app** `http://<laptop-ip>:8000/capture`: accept the consent form, then write each short piece of text with the Apple Pencil and tap Next; every piece is sent to the laptop as soon as you finish it. On the laptop open the **monitor** `http://127.0.0.1:8000/monitor` to watch live and browse old sessions (the monitor only works on the laptop itself). A session resumes where it stopped. Regenerate the control text with `python -m laxthya_ink.capture.prompts`.
+
 ## How it works
 
 ```

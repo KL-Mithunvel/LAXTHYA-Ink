@@ -71,3 +71,30 @@ capture:
   port: 8000
   probe_dir: data/probe # where signal-probe uploads are saved (git-ignored); relative to the repo root
   max_upload_mb: 20     # reject larger uploads
+  live_buffer_events: 30000  # pen events the live preview keeps in memory (not saved; the chunk upload is the record)
+  live_idle_s: 20            # a session counts as "live" on the monitor if it sent pen events this recently
+  db_path: data/capture.db        # SQLite store of writers, sessions and raw pen samples (git-ignored)
+  backup_dir: data/backup         # compressed JSON copy of each session, one folder per writer (git-ignored)
+  consent_version: "2026-10-30-v1" # bump whenever docs/CONSENT_FORM.md changes; stored with each writer
+  prompt_set_id: core-v1           # which generated control text the capture app serves (capture/prompts/<id>.json)
+  mm_per_css_px: 0.1924            # ASSUMED from the iPad Pro 11in (264 ppi, 2x scale): 25.4 / 132. Verify with a ruler
+                                   # and override in config.local.yaml; stored with every session
+
+# The control text every writer is asked to write (laxthya_ink/capture/prompts.py).
+# Changing anything here changes the text: regenerate with `python -m laxthya_ink.capture.prompts`
+# and bump capture.consent_version only if the consent wording changed.
+prompts:
+  seed: 20261030                   # fixed so the text is reproducible; reshuffles word/glyph order
+  pair_min: 2                      # every in-word lowercase letter pair appears at least this often
+  glyph_repeats: 3                 # each Greek letter, math symbol, punctuation mark, digit and Tamil letter
+  chunk_units: 90                  # writing effort per chunk (1 unit = one Latin character); about a minute
+  line_units: 30                   # writing effort per printed line
+  units_per_glyph:                 # relative effort of one glyph; Tamil letters have more strokes
+    latin: 1.0
+    digit: 1.0
+    symbol: 1.5
+    greek: 1.5
+    tamil: 2.5
+  writing_units_per_minute: 90     # ASSUMPTION used only for the time estimate - measure on the first writers
+  break_every_chunks: 8            # the page suggests a short break after this many chunks
+  max_pending_chunks: 3            # the page waits for the laptop if this many chunks are still unsent

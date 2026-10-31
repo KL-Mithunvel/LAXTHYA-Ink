@@ -3,14 +3,20 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from laxthya_ink.capture.server import create_app, resolve_dir
+from laxthya_ink.capture.server import create_app
+from laxthya_ink.capture.store import Store
+from laxthya_ink.config import resolve_path
 from tests.test_probe import _pen_session
+
+#: the Starlette test client reports its own host name instead of an IP
+TEST_HOSTS = ("testclient",)
 
 
 @pytest.fixture
 def client_and_dir(config, tmp_path):
     out = tmp_path / "probe"
-    return TestClient(create_app(config, probe_dir=out)), out
+    store = Store(tmp_path / "capture.db", tmp_path / "backup")
+    return TestClient(create_app(config, probe_dir=out, store=store, local_hosts=TEST_HOSTS)), out
 
 
 def test_index_serves_the_probe_page(client_and_dir):
@@ -50,12 +56,13 @@ def test_bad_events_are_422_and_nothing_is_saved(client_and_dir):
 
 def test_oversized_upload_is_413(config, tmp_path):
     config["capture"]["max_upload_mb"] = 0.001          # about 1 KB
-    client = TestClient(create_app(config, probe_dir=tmp_path))
+    store = Store(tmp_path / "c.db", tmp_path / "b")
+    client = TestClient(create_app(config, probe_dir=tmp_path, store=store, local_hosts=TEST_HOSTS))
     r = client.post("/api/probe", content=json.dumps(_pen_session()))
     assert r.status_code == 413
 
 
-def test_resolve_dir_relative_and_absolute(tmp_path):
-    assert resolve_dir(str(tmp_path)) == tmp_path
-    assert resolve_dir("data/probe").parts[-2:] == ("data", "probe")
-    assert resolve_dir("data/probe").is_absolute()
+def test_resolve_path_relative_and_absolute(tmp_path):
+    assert resolve_path(str(tmp_path)) == tmp_path
+    assert resolve_path("data/probe").parts[-2:] == ("data", "probe")
+    assert resolve_path("data/probe").is_absolute()

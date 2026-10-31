@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capture Monitor</title>
+<style>
+  :root { --bg: #fafaf7; --fg: #1d1d1b; --muted: #6b6b66; --line: #d8d8d0; --accent: #1f5f8b; --panel: #ffffff;
+          --ok: #1c8a4a; --warn: #b26a00; --hover: #9a9a94; --rule: #ececE4; --sel: #e8f1f8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17171a; --fg: #ececea; --muted: #9a9a94; --line: #34343a; --accent: #6db3e0; --panel: #202024;
+            --ok: #4cc27a; --warn: #e0a040; --hover: #6a6a72; --rule: #2a2a30; --sel: #25323d; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr; }
+  [hidden] { display: none !important; }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0; }
+  .tabs button { font: inherit; padding: 6px 14px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer; }
+  .tabs button:first-child { border-radius: 8px 0 0 8px; } .tabs button:last-child { border-radius: 0 8px 8px 0; border-left: 0; }
+  .tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { min-height: 0; }
+  .view { display: grid; grid-template-columns: 330px 1fr; height: 100%; min-height: 0; }
+  @media (max-width: 800px) { .view { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } }
+  .side { border-right: 1px solid var(--line); overflow: auto; padding: 12px; background: var(--panel); }
+  .side h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 12px 0 6px; }
+  .side h2:first-child { margin-top: 0; }
+  .item { display: block; width: 100%; text-align: left; font: inherit; color: inherit; background: none; border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; margin: 0 0 6px; cursor: pointer; }
+  .item.sel { background: var(--sel); border-color: var(--accent); }
+  .item small, .muted { color: var(--muted); }
+  .bar { height: 6px; border-radius: 3px; background: var(--rule); margin-top: 5px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--hover); margin-right: 6px; }
+  .dot.live { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .stage { display: grid; grid-template-rows: auto 1fr; min-height: 0; padding: 12px 16px; gap: 10px; }
+  .text { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; white-space: pre-wrap; font-size: 20px; min-height: 2.6em; }
+  .canvaswrap { position: relative; min-height: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    background-image: repeating-linear-gradient(transparent, transparent 71px, var(--rule) 72px); }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .info { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 13px; }
+  .empty { padding: 30px; color: var(--muted); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn { font: inherit; padding: 4px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Capture monitor</h1>
+  <div class="tabs"><button id="tabLive" class="on">Live</button><button id="tabArchive">Archive</button></div>
+  <span class="muted" id="conn"></span>
+</header>
+<main>
+  <div class="view" id="live">
+    <div class="side"><h2>Writing now</h2><div id="liveList"></div><div id="liveEmpty" class="muted">Nobody has sent anything yet.</div></div>
+    <div class="stage">
+      <div><div class="text" id="liveText">&nbsp;</div></div>
+      <div style="display:grid;grid-template-rows:auto 1fr;gap:8px;min-height:0">
+        <div class="info" id="liveInfo"></div>
+        <div class="canvaswrap"><canvas id="liveCanvas"></canvas></div>
+      </div>
+    </div>
+  </div>
+  <div class="view" id="archive" hidden>
+    <div class="side">
+      <h2>Writers</h2><div id="writers"></div>
+      <h2 id="sessionsH" hidden>Sessions</h2><div id="sessions"></div>
+      <h2 id="chunksH" hidden>Chunks</h2><div id="chunks"></div>
+    </div>
+    <div class="stage">
+      <div><div class="text" id="arcText">Pick a writer, a session and a chunk.</div></div>
+      <div style="display:grid;grid-template-rows:auto 1fr;gap:8px;min-height:0">
+        <div class="row"><button class="btn" id="prev">&#9664; Previous</button><button class="btn" id="nextC">Next &#9654;</button><span class="info" id="arcInfo"></span></div>
+        <div class="canvaswrap"><canvas id="arcCanvas"></canvas></div>
+      </div>
+    </div>
+  </div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const get = async url => { const r = await fetch(url); if (!r.ok) throw new Error(r.status + " " + (await r.text())); return r.json(); };
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function prepare(canvas) {
+  const r = canvas.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(r.width * d)); canvas.height = Math.max(1, Math.round(r.height * d));
+  const ctx = canvas.getContext("2d"); ctx.setTransform(d, 0, 0, d, 0, 0); ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.clearRect(0, 0, r.width, r.height);
+  return { ctx, w: r.width, h: r.height };
+}
+/** Fit a source box into the canvas keeping proportions; returns a mapper. */
+function fitter(w, h, srcW, srcH, srcX = 0, srcY = 0, pad = 16) {
+  const s = Math.min((w - 2 * pad) / srcW, (h - 2 * pad) / srcH);
+  return { s, x: p => pad + (p - srcX) * s, y: p => pad + (p - srcY) * s };
+}
+function drawSeg(ctx, fx, a, b, hover) {
+  ctx.strokeStyle = hover ? css("--hover") : css("--fg");
+  ctx.lineWidth = hover ? 1 : 1 + 4 * (b.pressure || 0.3);
+  ctx.globalAlpha = hover ? 0.5 : 1;
+  ctx.beginPath(); ctx.moveTo(fx.x(a.x), fx.y(a.y)); ctx.lineTo(fx.x(b.x), fx.y(b.y)); ctx.stroke(); ctx.globalAlpha = 1;
+}
+
+// ---------------- tabs ----------------
+function tab(name) {
+  $("live").hidden = name !== "live"; $("archive").hidden = name !== "archive";
+  $("tabLive").classList.toggle("on", name === "live"); $("tabArchive").classList.toggle("on", name === "archive");
+  if (name === "live") renderLive(); else { refreshArchive(); renderArchive(); }
+}
+$("tabLive").onclick = () => tab("live"); $("tabArchive").onclick = () => tab("archive");
+
+// ---------------- live ----------------
+let cursor = 0, picked = null, progHtml = "", sessionsLive = [];
+const LV = {};                                  // session id -> {events: [], chunk, text}
+const lv = sid => (LV[sid] ||= { events: [], chunk: "", text: "" });
+async function pollLive() {
+  try {
+    const r = await get("/api/monitor/live?after=" + cursor);
+    if (r.gap) for (const k of Object.keys(LV)) delete LV[k];
+    for (const e of r.entries) {
+      const s = lv(e.sid); s.chunk = e.chunk;
+      if (e.reset) s.events = []; else s.events.push(e.e);
+    }
+    cursor = r.cursor; sessionsLive = r.sessions;
+    for (const s of r.sessions) { const x = lv(s.session_id); x.text = s.text; x.canvas = s.canvas; x.writer = s.writer_id; }
+    $("conn").textContent = ""; $("conn").className = "muted";
+    if (!$("live").hidden) renderLive(r.entries.length > 0);
+  } catch (e) { $("conn").textContent = "monitor cannot reach the server: " + e.message; }
+}
+function renderLive() {
+  const list = $("liveList"); $("liveEmpty").hidden = sessionsLive.length > 0;
+  if (picked === null || !sessionsLive.some(s => s.session_id === picked)) {
+    const best = sessionsLive.find(s => s.live) || sessionsLive[0]; picked = best ? best.session_id : null;
+  }
+  list.innerHTML = sessionsLive.map(s => `<button class="item ${s.session_id === picked ? "sel" : ""}" data-sid="${s.session_id}">
+    <span class="dot ${s.live ? "live" : ""}"></span><b>${esc(s.writer_id)}</b> &middot; session ${s.session_id}<br>
+    <small>${s.live ? "writing now" : "idle " + Math.round(s.idle_s) + " s"} &middot; ${esc(s.chunk_id)}</small></button>`).join("");
+  for (const b of list.querySelectorAll(".item")) b.onclick = () => { picked = Number(b.dataset.sid); progHtml = ""; pollProgress(); renderLive(); };
+  const s = picked === null ? null : lv(picked);
+  $("liveText").textContent = s && s.text ? s.text : " ";
+  const { ctx, w, h } = prepare($("liveCanvas"));
+  if (!s) { $("liveInfo").textContent = ""; return; }
+  const cv = s.canvas || { w: 1000, h: 640 }, fx = fitter(w, h, cv.w, cv.h, 0, 0, 8);
+  let last = null;
+  for (const e of s.events) {
+    if (e.k === "pointerdown") last = e;
+    else if (e.k === "pointermove" && last && e.b > 0) { drawSeg(ctx, fx, last, e, false); last = e; }
+    else if (e.k === "pointermove" && e.b === 0) { if (last) last = null; }
+    else if (e.k === "pointerup" || e.k === "pointercancel") last = null;
+  }
+  const tip = s.events[s.events.length - 1];
+  if (tip) { ctx.fillStyle = tip.b > 0 ? "#d33" : css("--accent"); ctx.beginPath(); ctx.arc(fx.x(tip.x), fx.y(tip.y), tip.b > 0 ? 4 : 6, 0, 7); ctx.fill(); }
+  const strokes = s.events.filter(e => e.k === "pointerdown").length;
+  $("liveInfo").innerHTML = `<span>chunk ${esc(s.chunk)}</span><span>${strokes} stroke(s) in this chunk</span><span>${s.events.length} events</span><span>${progHtml}</span>`;
+}
+async function pollProgress() {
+  if (picked === null || $("live").hidden) return;
+  try {
+    const r = await get("/api/monitor/sessions/" + picked), done = r.chunks.length, pct = Math.round(100 * done / r.total_chunks);
+    progHtml = `<b>${done} / ${r.total_chunks}</b> chunks saved (${pct}%)${r.note ? " &middot; note: " + esc(r.note) : ""}`;
+  } catch (e) { /* the next poll will retry */ }
+}
+
+// ---------------- archive ----------------
+const AR = { writer: null, session: null, chunks: [], chunk: null };
+async function refreshArchive() {
+  try {
+    const ws = await get("/api/monitor/writers");
+    $("writers").innerHTML = ws.length ? ws.map(w => `<button class="item ${w.id === AR.writer ? "sel" : ""}" data-id="${w.id}"><b>${w.id}</b> ${w.consent_sharing ? '<small>(sharing ok)</small>' : ""}<br>
+      <small>${esc(w.note) || "no note"} &middot; ${w.sessions} session(s), ${w.chunks_done} chunks</small></button>`).join("") : '<div class="muted">No writers yet.</div>';
+    for (const b of $("writers").querySelectorAll(".item")) b.onclick = () => { AR.writer = b.dataset.id; AR.session = AR.chunk = null; refreshArchive(); renderArchive(); };
+    if (AR.writer) {
+      const r = await get(`/api/monitor/writers/${AR.writer}/sessions`);
+      $("sessionsH").hidden = false;
+      $("sessions").innerHTML = r.sessions.map(s => `<button class="item ${s.id === AR.session ? "sel" : ""}" data-id="${s.id}">session ${s.id} &middot; ${esc(s.prompt_set)}<br>
+        <small>${s.chunks_done} / ${r.total_chunks} chunks &middot; ${s.samples} samples &middot; ${s.ended_at ? "finished" : "open"}<br>${esc(s.started_at)}</small>
+        <div class="bar"><i style="width:${Math.round(100 * s.chunks_done / r.total_chunks)}%"></i></div></button>`).join("") || '<div class="muted">No sessions.</div>';
+      for (const b of $("sessions").querySelectorAll(".item")) b.onclick = () => { AR.session = Number(b.dataset.id); AR.chunk = null; refreshArchive(); renderArchive(); };
+    }
+    if (AR.session) {
+      const r = await get("/api/monitor/sessions/" + AR.session); AR.chunks = r.chunks;
+      $("chunksH").hidden = false;
+      $("chunks").innerHTML = r.chunks.map(c => `<button class="item ${c.prompt_seq === AR.chunk ? "sel" : ""}" data-seq="${c.prompt_seq}">
+        <b>#${c.prompt_seq}</b> ${esc(c.section)} <small>${c.n_samples} samples</small><br><small>${esc((c.text || "").split("\n")[0])}</small></button>`).join("") || '<div class="muted">Nothing saved yet.</div>';
+      for (const b of $("chunks").querySelectorAll(".item")) b.onclick = () => { AR.chunk = Number(b.dataset.seq); refreshArchive(); renderArchive(); };
+    }
+  } catch (e) { $("conn").textContent = "cannot load archive: " + e.message; }
+}
+async function renderArchive() {
+  const { ctx, w, h } = prepare($("arcCanvas"));
+  const c = AR.chunks.find(x => x.prompt_seq === AR.chunk);
+  if (!AR.session || !c) { $("arcText").textContent = "Pick a writer, a session and a chunk."; $("arcInfo").textContent = ""; return; }
+  $("arcText").textContent = c.text || "";
+  const r = await get(`/api/monitor/sessions/${AR.session}/strokes?chunk=${AR.chunk}`), strokes = r.strokes;
+  const pts = strokes.flatMap(s => s.points);
+  if (!pts.length) return;
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), y0 = Math.min(...ys), sw = Math.max(1, Math.max(...xs) - x0), sh = Math.max(1, Math.max(...ys) - y0);
+  const fx = fitter(w, h, sw, sh, x0, y0, 24);
+  for (const s of strokes) for (let i = 1; i < s.points.length; i++) {
+    const a = s.points[i - 1], b = s.points[i];
+    drawSeg(ctx, fx, { x: a[0], y: a[1] }, { x: b[0], y: b[1], pressure: b[2] }, false);
+  }
+  const press = pts.map(p => p[2]).filter(v => v != null), t = pts.map(p => p[3]);
+  $("arcInfo").innerHTML = `<span>${strokes.length} strokes</span><span>${pts.length} samples</span><span>${((Math.max(...t) - Math.min(...t)) / 1000).toFixed(1)} s</span>` +
+    (press.length ? `<span>max pressure ${Math.max(...press).toFixed(2)}</span>` : "");
+}
+function step(d) {
+  const i = AR.chunks.findIndex(x => x.prompt_seq === AR.chunk), j = Math.min(AR.chunks.length - 1, Math.max(0, i + d));
+  if (AR.chunks[j]) { AR.chunk = AR.chunks[j].prompt_seq; refreshArchive(); renderArchive(); }
+}
+$("prev").onclick = () => step(-1); $("nextC").onclick = () => step(1);
+window.addEventListener("resize", () => { renderLive(); renderArchive(); });
+
+setInterval(pollLive, 400);
+setInterval(pollProgress, 3000);
+setInterval(() => { if (!$("archive").hidden) refreshArchive(); }, 5000);
+pollLive();
+</script>
+</body>
+</html>

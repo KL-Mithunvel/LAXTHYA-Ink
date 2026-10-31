@@ -27,8 +27,13 @@ def main() -> None:
     config = load_config()
     cap = config["capture"]
     ip = lan_address()
-    print("Capture server starting. Open this on the iPad (same Wi-Fi as this laptop):")
-    print(f"  http://{ip or '<this-laptop-ip>'}:{cap['port']}/")
+    host = ip or "<this-laptop-ip>"
+    print("Capture server starting.")
+    print("  iPad (same Wi-Fi as this laptop):")
+    print(f"    writing app:   http://{host}:{cap['port']}/capture")
+    print(f"    signal probe:  http://{host}:{cap['port']}/")
+    print("  This laptop only:")
+    print(f"    monitor:       http://127.0.0.1:{cap['port']}/monitor")
     print("Allow Python through the Windows firewall (private networks) if asked. Ctrl+C to stop.")
     uvicorn.run(create_app(config), host=cap["host"], port=cap["port"], log_level="info")
 

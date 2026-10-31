@@ -1,5 +1,18 @@
 # Claude Log
 
+## 2026-10-30 — Capture storage and consent form
+- Committed the probe work as 05a202b.
+- Owner decisions: consent scope = project use + anonymised research sharing; consent recorded by tick-box in the app; each writer has a free-text note. Implemented sharing as a separate optional tick and kept the note out of all exports/backups by default (a name in it would break anonymity); both choices flagged to the owner and recorded in the plan.
+- Built `laxthya_ink/capture/store.py` (SQLite): writers with consent fields (DB refuses a writer without project consent), never-reused IDs, sessions (style natural/cursive/print/careful), prompts, raw samples (touch dropped, all-or-nothing batches), derived strokes (idempotent, hover samples unassigned), gzip JSON backup per session, complete writer deletion (rows + backup files). 24 tests; total 162 pass.
+- Config: `capture.db_path`, `backup_dir`, `consent_version`; moved the path helper into `config.resolve_path`.
+- Drafted `docs/CONSENT_FORM.md` (version 2026-10-30-v1). It contains commitments written on the owner's behalf (no use for anything the writer must sign, no handing the model to others, telling writers who received shared data) - owner must review/edit and fill the [brackets] before real use.
+- Not done at that point: capture app pages and endpoints; prompt text design. (Done later the same day, below.)
+- Owner asked for the capture GUI with the control text split into small chunks sent to the laptop, plus a laptop view of progress (old data and live). Decisions: chunk ~1 minute; English text designed with a coverage check.
+- Built: `capture/prompts.py` (+ `words_en.txt`, committed `prompts/core-v1.json`), `capture/live.py`, store chunk/read methods (`save_chunk` idempotent and atomic, `read_strokes`, `list_sessions`, ...), server endpoints, `static/capture.html` (iPad app: consent with two ticks, pen-only, undo/clear/next, IndexedDB queue with retry, resume, breaks, live preview) and `static/monitor.html` (Live + Archive). Config: `prompts:` section, `capture.prompt_set_id`, `mm_per_css_px`, live settings. 207 tests pass; JS syntax-checked with node; API walked end to end against the real server with a throwaway DB, including 403 for the monitor from the LAN address.
+- Security decision: the monitor/archive endpoints are laptop-only (127.0.0.1 / ::1) because the server listens on the LAN and they expose handwriting and notes.
+- Finding: the generated English text is 269 filler strings (about half the letters are gibberish) and the whole core is an estimated 67 minutes; real words cover only 299 of 676 pairs twice. Recorded with options in the plan; owner decision pending. Time estimate rests on an assumed 90 units/min.
+- Not verified: the pages in a real browser / on the iPad; writing speed; mm per CSS pixel.
+
 ## 2026-10-30 — First probe result from the iPad Pro M4
 - Ran the capture server; owner uploaded one probe (`data/probe/probe-20261030-123914.json`). Results recorded in `docs/PROJECT_PLAN.md` -> Probe result 1: pressure, tilt, altitude, azimuth and hover presence all work; roll and tangential pressure constant 0; no hover height; ~106 samples/s with frame-quantised timestamps; `getCoalescedEvents` absent in Safari 26.5.
 - Fixed two bugs in my own code: (1) `probe.py` reported 59 Hz because it only used gaps between distinct timestamps - now counts every in-stroke sample (106 Hz) and flags timestamp quantisation; two new tests (138 pass). (2) `probe.html` drew ink offset from the pen (viewport coordinates on a canvas below the header) - now subtracts the canvas rect, which is also saved in the upload meta. Recorded coordinates were never affected.

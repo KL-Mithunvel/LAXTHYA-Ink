@@ -47,6 +47,14 @@ class ProbeDataError(InkError):
     """A signal-probe upload is malformed (not JSON, no events, bad event fields)."""
 
 
+class StoreError(InkError):
+    """The capture store refused an operation: unknown writer, bad style, malformed sample."""
+
+
+class ConsentRequiredError(StoreError):
+    """A writer cannot be added without the required project-use consent."""
+
+
 class WritingAreaError(InkError):
     """The strokes, once laid out, fall outside the configured paper area."""
 

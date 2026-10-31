@@ -13,7 +13,8 @@ from typing import Any
 
 import yaml
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CONFIG_PATH = REPO_ROOT / "config.yaml"
 
 #: (section, key) pairs that must be present and numeric (int/float, not bool).
 _NUMERIC_KEYS: tuple[tuple[str, str], ...] = (
@@ -27,13 +28,19 @@ _NUMERIC_KEYS: tuple[tuple[str, str], ...] = (
     ("motion", "draw_feed"), ("motion", "travel_feed"), ("motion", "z_feed"),
     ("park", "x"), ("park", "y"), ("park", "safe_z"),
     ("sim", "contact_tolerance_mm"), ("sim", "command_delay_s"),
-    ("capture", "port"), ("capture", "max_upload_mb"),
+    ("capture", "port"), ("capture", "max_upload_mb"), ("capture", "mm_per_css_px"),
+    ("capture", "live_buffer_events"), ("capture", "live_idle_s"),
+    ("prompts", "seed"), ("prompts", "pair_min"), ("prompts", "glyph_repeats"),
+    ("prompts", "chunk_units"), ("prompts", "line_units"), ("prompts", "writing_units_per_minute"),
+    ("prompts", "break_every_chunks"), ("prompts", "max_pending_chunks"),
 )
 
 #: (section, key) pairs that must be present and a non-empty string.
 _STRING_KEYS: tuple[tuple[str, str], ...] = (
     ("printer", "port"),
     ("capture", "host"), ("capture", "probe_dir"),
+    ("capture", "db_path"), ("capture", "backup_dir"), ("capture", "consent_version"),
+    ("capture", "prompt_set_id"),
 )
 
 #: (section, key) pairs that must be present and boolean.
@@ -43,6 +50,9 @@ _BOOL_KEYS: tuple[tuple[str, str], ...] = (
     ("gcode", "use_line_numbers"),
 )
 
+#: scripts that need an effort weight in prompts.units_per_glyph
+_GLYPH_WEIGHT_SCRIPTS = ("latin", "digit", "symbol", "greek", "tamil")
+
 #: numeric keys that must be strictly positive
 _POSITIVE_KEYS: tuple[tuple[str, str], ...] = (
     ("printer", "baud"), ("printer", "ack_timeout_s"),
@@ -51,7 +61,11 @@ _POSITIVE_KEYS: tuple[tuple[str, str], ...] = (
     ("pen", "lift_mm"),
     ("writing", "scale_mm_per_unit"), ("writing", "line_spacing_mm"),
     ("motion", "draw_feed"), ("motion", "travel_feed"), ("motion", "z_feed"),
-    ("capture", "port"), ("capture", "max_upload_mb"),
+    ("capture", "port"), ("capture", "max_upload_mb"), ("capture", "mm_per_css_px"),
+    ("capture", "live_buffer_events"), ("capture", "live_idle_s"),
+    ("prompts", "pair_min"), ("prompts", "glyph_repeats"), ("prompts", "chunk_units"),
+    ("prompts", "line_units"), ("prompts", "writing_units_per_minute"),
+    ("prompts", "break_every_chunks"), ("prompts", "max_pending_chunks"),
 )
 
 #: numeric keys that must be >= 0
@@ -102,6 +116,14 @@ def _validate(config: dict) -> None:
         if config[section][key] < 0:
             raise ValueError(f"config {section}.{key} must be >= 0, got {config[section][key]!r}")
 
+    weights = _require(config, "prompts", "units_per_glyph")
+    for script in _GLYPH_WEIGHT_SCRIPTS:
+        w = weights.get(script) if isinstance(weights, dict) else None
+        if isinstance(w, bool) or not isinstance(w, (int, float)) or w <= 0:
+            raise ValueError(f"config prompts.units_per_glyph.{script} must be a number > 0, got {w!r}")
+    if config["prompts"]["line_units"] > config["prompts"]["chunk_units"]:
+        raise ValueError("config prompts.line_units must not exceed prompts.chunk_units")
+
     pen, park, machine = config["pen"], config["park"], config["machine"]
     pen_up_z = pen["down_z"] + pen["lift_mm"]
     if pen["down_z"] < pen["min_z"]:
@@ -118,6 +140,12 @@ def _validate(config: dict) -> None:
         )
     if not (0 <= park["x"] <= machine["x_max"] and 0 <= park["y"] <= machine["y_max"]):
         raise ValueError("config park.x / park.y must lie inside the machine volume")
+
+
+def resolve_path(path: str | Path) -> Path:
+    """A configured path: absolute as given, otherwise relative to the repo root."""
+    p = Path(path)
+    return p if p.is_absolute() else REPO_ROOT / p
 
 
 def local_config_path(path: str | Path | None = None) -> Path:

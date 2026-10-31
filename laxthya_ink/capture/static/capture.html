@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Handwriting Capture</title>
+<style>
+  :root { --bg: #fafaf7; --fg: #1d1d1b; --muted: #6b6b66; --line: #d8d8d0; --accent: #1f5f8b; --panel: #ffffff;
+          --ok: #1c8a4a; --warn: #b26a00; --bad: #b3261e; --rule: #e3e3dc; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17171a; --fg: #ececea; --muted: #9a9a94; --line: #34343a; --accent: #6db3e0; --panel: #202024;
+            --ok: #4cc27a; --warn: #e0a040; --bad: #f07a72; --rule: #2a2a30; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 16px/1.45 -apple-system, system-ui, sans-serif; overscroll-behavior: none; }
+  [hidden] { display: none !important; }
+  button { font: inherit; padding: 10px 18px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--panel); color: var(--fg); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; }
+  input[type=text] { font: inherit; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--panel); color: var(--fg); width: 100%; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  h2 { font-size: 15px; margin: 18px 0 6px; }
+  .muted { color: var(--muted); }
+
+  #start { max-width: 760px; margin: 0 auto; padding: 24px 20px 60px; overflow: auto; height: 100%; }
+  #consent { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 4px 18px 14px;
+    max-height: 42vh; overflow: auto; }
+  #consent p, #consent li { margin: 6px 0; }
+  .banner { background: color-mix(in srgb, var(--warn) 18%, transparent); border: 1px solid var(--warn);
+    border-radius: 10px; padding: 8px 12px; margin: 10px 0; }
+  .tick { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; font-size: 17px; }
+  .tick input { width: 24px; height: 24px; margin-top: 2px; flex: none; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  .err { color: var(--bad); margin-top: 8px; min-height: 1.4em; }
+
+  #write { display: grid; grid-template-rows: auto auto 1fr; height: 100%; }
+  #bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line); }
+  #progress { flex: 1 1 220px; min-width: 160px; }
+  #progress .track { height: 8px; border-radius: 4px; background: var(--rule); overflow: hidden; margin-top: 4px; }
+  #progress .fill { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  #status { font-size: 14px; }
+  #status.ok { color: var(--ok); } #status.wait { color: var(--warn); } #status.bad { color: var(--bad); }
+  #prompt { padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  #prompt .line { font-size: 27px; line-height: 1.45; white-space: pre-wrap; letter-spacing: .01em; }
+  #pad { position: relative; min-height: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    background: repeating-linear-gradient(transparent, transparent 71px, var(--rule) 72px); }
+  #flash { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); background: var(--fg); color: var(--bg);
+    padding: 8px 16px; border-radius: 20px; pointer-events: none; opacity: 0; transition: opacity .25s; }
+
+  #overlay { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 88%, transparent);
+    display: grid; place-items: center; padding: 20px; }
+  #card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 26px 30px;
+    max-width: 560px; text-align: center; }
+  #card h2 { font-size: 22px; margin: 0 0 8px; }
+  #card .big { font-size: 40px; font-weight: 700; letter-spacing: .04em; margin: 8px 0; }
+</style>
+</head>
+<body>
+
+<section id="start" hidden>
+  <h1>Handwriting capture</h1>
+  <p class="muted">You will write short pieces of text with the Apple Pencil. Each piece is sent to the laptop as soon as you tap Next.</p>
+  <div id="consentWarn" class="banner" hidden>The consent form still has [bracketed] blanks. Fill them in <code>docs/CONSENT_FORM.md</code> before real use.</div>
+  <div id="consent"></div>
+  <label class="tick"><input type="checkbox" id="c1"><span><b>1. I agree</b> to my handwriting being recorded and used for this project, as described above. <span class="muted">(Required to take part.)</span></span></label>
+  <label class="tick"><input type="checkbox" id="c2"><span><b>2. I also agree</b> that my recorded handwriting may be shared, without my name or note, with other researchers. <span class="muted">(Optional.)</span></span></label>
+  <h2>Operator</h2>
+  <label class="muted" for="note">Note about this writer (name or anything else; stays on this laptop and is never exported)</label>
+  <input type="text" id="note" autocomplete="off" maxlength="500">
+  <label class="tick" style="font-size:15px"><input type="checkbox" id="protector"><span>A paper-texture screen protector is fitted</span></label>
+  <div class="row"><button class="primary" id="startBtn" disabled>Start writing</button><span id="startErr" class="err"></span></div>
+  <h2>Already started before?</h2>
+  <div class="row"><input type="text" id="resumeId" placeholder="Writer ID, e.g. W003" style="max-width:220px" autocomplete="off"><button id="resumeBtn">Resume</button></div>
+  <p class="muted">Only the Apple Pencil writes. Touching the screen with your hand is ignored.</p>
+</section>
+
+<section id="write" hidden>
+  <div id="bar">
+    <div id="progress"><span id="progressText"></span><div class="track"><div class="fill" id="fill"></div></div></div>
+    <span id="status" class="ok">&#10003; all saved to the laptop</span>
+    <button id="dl" hidden>Download unsent</button>
+    <button id="undo">Undo stroke</button>
+    <button id="clear">Clear</button>
+    <button id="next" class="primary">Next &#9656;</button>
+  </div>
+  <div id="prompt"></div>
+  <div id="pad"><canvas id="c"></canvas><div id="flash"></div></div>
+</section>
+
+<div id="overlay" hidden><div id="card"></div></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const allowMouse = new URLSearchParams(location.search).has("mouse");   // desktop testing only
+const JSON_HEADERS = { "Content-Type": "application/json" };
+const S = { writerId: null, sessionId: null, done: new Set(), idx: -1, events: [], starts: [], drawing: false,
+            shownIntro: new Set(), sinceBreak: 0, pending: 0, rejected: 0, finished: false,
+            liveBuf: [], liveReplace: false };
+let P = null;                                   // the prompt set
+
+// ---------- small helpers ----------
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function md(text) {
+  const out = []; let list = false;
+  for (const raw of text.split("\n")) {
+    const line = esc(raw).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>");
+    if (raw.startsWith("- ") || /^\d+\. /.test(raw)) { if (!list) { out.push("<ul>"); list = true; } out.push("<li>" + line.replace(/^(- |\d+\. )/, "") + "</li>"); continue; }
+    if (list) { out.push("</ul>"); list = false; }
+    if (raw.startsWith("## ")) out.push("<h2>" + line.slice(3) + "</h2>");
+    else if (raw.trim()) out.push("<p>" + line + "</p>");
+  }
+  if (list) out.push("</ul>");
+  return out.join("\n");
+}
+async function post(url, body) {
+  const r = await fetch(url, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || ("HTTP " + r.status));
+  return j;
+}
+function flash(msg) {
+  const f = $("flash"); f.textContent = msg; f.style.opacity = 1;
+  clearTimeout(flash.t); flash.t = setTimeout(() => { f.style.opacity = 0; }, 2200);
+}
+function card(html, buttonLabel, onClick) {
+  $("card").innerHTML = html + (buttonLabel ? '<div class="row" style="justify-content:center"><button class="primary" id="cardBtn">' + esc(buttonLabel) + "</button></div>" : "");
+  $("overlay").hidden = false;
+  if (buttonLabel) $("cardBtn").onclick = () => { $("overlay").hidden = true; onClick && onClick(); };
+}
+
+// ---------- IndexedDB queue: chunks written but not yet confirmed by the laptop ----------
+const idb = {
+  db: null,
+  open() {
+    return new Promise((resolve, reject) => {
+      const rq = indexedDB.open("laxthya-capture", 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore("pending", { keyPath: "key" });
+      rq.onsuccess = () => { this.db = rq.result; resolve(); };
+      rq.onerror = () => reject(rq.error);
+    });
+  },
+  run(mode, fn) {
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction("pending", mode); const rq = fn(tx.objectStore("pending"));
+      tx.oncomplete = () => resolve(rq && rq.result); tx.onerror = () => reject(tx.error);
+    });
+  },
+  put(item) { return this.run("readwrite", s => s.put(item)); },
+  del(key) { return this.run("readwrite", s => s.delete(key)); },
+  all() { return this.run("readonly", s => s.getAll()); },
+};
+
+// ---------- sending finished chunks (the durable record) ----------
+let flushing = false, retryMs = 3000, retryTimer = null;
+async function refreshPending() {
+  const items = await idb.all();
+  S.pending = items.length; S.rejected = items.filter(i => i.rejected).length;
+  const st = $("status");
+  if (S.rejected) { st.className = "bad"; st.textContent = "⚠ " + S.rejected + " chunk(s) rejected by the laptop - tell the operator"; }
+  else if (S.pending) { st.className = "wait"; st.textContent = "⏳ " + S.pending + " chunk(s) waiting to send"; }
+  else { st.className = "ok"; st.textContent = "✓ all saved to the laptop"; }
+  $("dl").hidden = S.pending === 0;
+  $("next").disabled = S.pending >= P.max_pending_chunks;
+}
+async function flush() {
+  if (flushing) return;
+  flushing = true; let failed = false;
+  try {
+    for (const it of await idb.all()) {
+      if (it.rejected) continue;
+      let r;
+      try { r = await fetch(`/api/sessions/${it.sessionId}/chunks/${it.chunkId}`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ events: it.events }) }); }
+      catch (e) { failed = true; break; }
+      if (r.ok) await idb.del(it.key);                              // stored (or already stored): safe to forget
+      else if (r.status >= 500 || r.status === 408 || r.status === 429) { failed = true; break; }
+      else { const j = await r.json().catch(() => ({})); it.rejected = j.detail || ("HTTP " + r.status); await idb.put(it); }
+    }
+  } finally { flushing = false; }
+  await refreshPending();
+  clearTimeout(retryTimer);
+  if (failed) { retryTimer = setTimeout(flush, retryMs); retryMs = Math.min(retryMs * 2, 30000); }
+  else retryMs = 3000;
+  maybeFinish();
+}
+$("dl").onclick = async () => {
+  const blob = new Blob([JSON.stringify(await idb.all())], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "unsent-chunks.json"; a.click();
+};
+window.addEventListener("online", flush);
+setInterval(() => { if (S.sessionId && S.pending) flush(); }, 15000);
+
+// ---------- live preview (best effort, never the record) ----------
+function liveTick() {
+  if (!S.sessionId || P === null || S.idx < 0) return;
+  if (!S.liveBuf.length && !S.liveReplace) return;
+  const chunk = P.chunks[S.idx], r = $("c").getBoundingClientRect();
+  const body = { chunk_id: chunk.id, text: chunk.lines.join("\n"), canvas: { w: r.width, h: r.height },
+                 replace: S.liveReplace, events: S.liveReplace ? S.events.slice(-3000) : S.liveBuf };
+  S.liveBuf = []; S.liveReplace = false;
+  fetch(`/api/live/${S.sessionId}`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) }).catch(() => {});
+}
+setInterval(liveTick, 400);
+
+// ---------- writing surface ----------
+const canvas = $("c"), ctx = canvas.getContext("2d");
+function fit() {
+  const r = canvas.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  canvas.width = Math.round(r.width * d); canvas.height = Math.round(r.height * d);
+  ctx.setTransform(d, 0, 0, d, 0, 0); ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.strokeStyle = getComputedStyle(document.body).color;
+  redraw();
+}
+function seg(a, b) {
+  ctx.lineWidth = 1 + 5 * (b.pressure || 0.3);
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+}
+function redraw() {
+  const r = canvas.getBoundingClientRect(); ctx.clearRect(0, 0, r.width, r.height);
+  let last = null;
+  for (const e of S.events) {
+    if (e.k === "pointerdown") last = e;
+    else if (e.k === "pointermove" && e.b > 0 && last) { seg(last, e); last = e; }
+    else if (e.k === "pointerup" || e.k === "pointercancel") last = null;
+  }
+}
+window.addEventListener("resize", () => { if (!$("write").hidden) fit(); });
+
+const accept = e => e.pointerType === "pen" || (allowMouse && e.pointerType === "mouse");   // touch (palm) is ignored
+function snap(e, r) {
+  return { k: e.type, t: e.timeStamp, x: e.clientX - r.left, y: e.clientY - r.top, pt: e.pointerType, b: e.buttons,
+           pressure: e.pressure, tiltX: e.tiltX, tiltY: e.tiltY, altitudeAngle: e.altitudeAngle, azimuthAngle: e.azimuthAngle };
+}
+function onPointer(e) {
+  e.preventDefault();
+  if (!accept(e) || S.idx < 0 || !$("overlay").hidden) return;
+  const r = canvas.getBoundingClientRect(), ev = snap(e, r);
+  if (e.type === "pointerdown") { canvas.setPointerCapture(e.pointerId); S.starts.push(S.events.length); S.drawing = true; }
+  else if (e.type === "pointermove" && e.buttons > 0 && !S.drawing) return;
+  const prev = S.events.length ? S.events[S.events.length - 1] : null;
+  S.events.push(ev); S.liveBuf.push(ev);
+  if (e.type === "pointermove" && e.buttons > 0 && prev && (prev.k === "pointerdown" || (prev.k === "pointermove" && prev.b > 0))) seg(prev, ev);
+  if (e.type === "pointerup" || e.type === "pointercancel") S.drawing = false;
+}
+for (const t of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) canvas.addEventListener(t, onPointer, { passive: false });
+for (const t of ["contextmenu", "gesturestart", "selectstart"]) document.addEventListener(t, e => e.preventDefault());
+
+function resetChunk() { S.events = []; S.starts = []; S.drawing = false; S.liveBuf = []; S.liveReplace = true; redraw(); }
+$("undo").onclick = () => {
+  if (!S.starts.length) return;
+  S.events.length = S.starts.pop(); S.drawing = false; S.liveReplace = true; redraw();
+};
+$("clear").onclick = () => { if (S.events.length) { resetChunk(); flash("Cleared. Write the text again."); } };
+
+// ---------- moving through the chunks ----------
+function nextIndex(from) { for (let i = from; i < P.chunks.length; i++) if (!S.done.has(P.chunks[i].id)) return i; return -1; }
+function showChunk() {
+  const c = P.chunks[S.idx];
+  $("prompt").innerHTML = c.lines.map(l => '<div class="line">' + esc(l) + "</div>").join("");
+  const doneN = S.done.size;
+  $("progressText").textContent = `Chunk ${doneN + 1} of ${P.chunks.length}`;
+  $("fill").style.width = (100 * doneN / P.chunks.length) + "%";
+  fit();
+}
+function loadChunk() {
+  const c = P.chunks[S.idx];
+  const afterIntro = () => {
+    if (S.sinceBreak >= P.break_every_chunks) { S.sinceBreak = 0; card("<h2>Take a short break</h2><p class='muted'>Rest your hand. Everything so far is saved.</p>", "Continue", showChunk); }
+    else showChunk();
+  };
+  showChunk();
+  if (c.intro && !S.shownIntro.has(c.section)) {
+    S.shownIntro.add(c.section);
+    card("<h2>" + esc(c.section.replace(/-/g, " ")) + "</h2><p>" + esc(c.intro) + "</p>", "Begin", afterIntro);
+  } else afterIntro();
+}
+$("next").onclick = async () => {
+  if (!S.starts.length) return flash("Write the text above first.");
+  if (S.drawing) return;
+  const c = P.chunks[S.idx];
+  await idb.put({ key: `${S.sessionId}:${c.id}`, sessionId: S.sessionId, chunkId: c.id, events: S.events.slice(), savedAt: Date.now() });
+  S.done.add(c.id); S.sinceBreak++;
+  S.events = []; S.starts = []; S.liveBuf = []; S.liveReplace = true; liveTick();
+  S.idx = nextIndex(S.idx + 1);
+  await refreshPending();
+  flush();
+  if (S.idx < 0) { card("<h2>Finishing...</h2><p class='muted'>Sending the last pieces to the laptop.</p>"); maybeFinish(); }
+  else loadChunk();
+};
+async function maybeFinish() {
+  if (S.finished || S.idx >= 0 || !S.sessionId || S.pending > 0) return;
+  S.finished = true;
+  try { await post(`/api/sessions/${S.sessionId}/finish`, {}); } catch (e) { S.finished = false; return; }
+  localStorage.removeItem("laxthya.resume");
+  card(`<h2>All done - thank you!</h2><p>Your writer ID is</p><div class="big">${esc(S.writerId)}</div><p class="muted">Everything is saved on the laptop. You can close this page.</p>`);
+}
+
+// ---------- start / resume ----------
+const tick = () => { $("startBtn").disabled = !$("c1").checked; };
+$("c1").onchange = tick;
+function deviceInfo() {
+  return { userAgent: navigator.userAgent, screen: `${screen.width}x${screen.height}`, devicePixelRatio: window.devicePixelRatio,
+           viewport: `${innerWidth}x${innerHeight}`, maxTouchPoints: navigator.maxTouchPoints };
+}
+async function beginSession() {
+  const r = await post("/api/sessions", { writer_id: S.writerId, protector: $("protector").checked, device: deviceInfo() });
+  S.sessionId = r.session_id; S.done = new Set(r.done_chunks);
+  for (const it of await idb.all()) if (it.sessionId === S.sessionId) S.done.add(it.chunkId);   // written, still being sent
+  localStorage.setItem("laxthya.resume", S.writerId);
+  $("start").hidden = true; $("write").hidden = false;
+  S.idx = nextIndex(0);
+  await refreshPending();
+  if (S.idx < 0) { maybeFinish(); return; }
+  loadChunk();
+  flush();
+}
+$("startBtn").onclick = async () => {
+  $("startErr").textContent = ""; $("startBtn").disabled = true;
+  try {
+    const w = await post("/api/writers", { consent_project: $("c1").checked, consent_sharing: $("c2").checked, note: $("note").value });
+    S.writerId = w.writer_id;
+    await beginSession();
+  } catch (e) { $("startErr").textContent = e.message; tick(); }
+};
+$("resumeBtn").onclick = async () => {
+  $("startErr").textContent = "";
+  S.writerId = $("resumeId").value.trim().toUpperCase();
+  try { await beginSession(); } catch (e) { $("startErr").textContent = e.message; }
+};
+
+(async function init() {
+  try {
+    await idb.open();
+    P = await (await fetch("/api/prompts")).json();
+    const c = await (await fetch("/api/consent")).json();
+    $("consent").innerHTML = md(c.text);
+    $("consentWarn").hidden = !c.has_placeholders;
+    $("resumeId").value = localStorage.getItem("laxthya.resume") || "";
+    $("start").hidden = false;
+  } catch (e) { document.body.textContent = "Cannot reach the laptop: " + e.message; }
+})();
+</script>
+</body>
+</html>
