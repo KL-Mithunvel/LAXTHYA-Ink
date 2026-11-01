@@ -192,6 +192,42 @@ def _findings(s: dict) -> list[str]:
     return out
 
 
+def extract_paths(payload: object) -> dict:
+    """The Pencil's drawn strokes and its hover trails from an upload, for the monitor to draw.
+
+    Returns `{"strokes": [[[x, y, pressure, t], ...], ...], "hover": [[[x, y, pressure, t], ...], ...]}`.
+    Only `pen` events are used; coordinates are the page's viewport pixels. Raises `ProbeDataError`.
+    """
+    _, events = _validate(payload)
+    strokes: list[list] = []
+    hover: list[list] = []
+    stroke: list | None = None
+    trail: list | None = None
+    for ev in events:
+        if ev["pt"] != "pen":
+            continue
+        point = [ev["x"], ev["y"], ev.get("pressure"), ev["t"]]
+        kind, buttons = ev["k"], ev["b"]
+        if kind == "pointerdown":
+            stroke, trail = [point], None
+            strokes.append(stroke)
+        elif kind == "pointermove" and buttons > 0 and stroke is not None:
+            stroke.append(point)
+        elif kind in ("pointerup", "pointercancel"):
+            if stroke is not None:
+                stroke.append(point)
+            stroke = None
+        elif kind == "pointermove" and buttons == 0 and stroke is not None:
+            continue                                         # a stale hover sample that arrived late, inside a stroke
+        elif kind == "pointermove" and buttons == 0:         # nothing pressed: the pen is in the air
+            stroke = None
+            if trail is None:
+                trail = []
+                hover.append(trail)
+            trail.append(point)
+    return {"strokes": strokes, "hover": hover}
+
+
 def format_report(summary: dict) -> str:
     """The summary as readable text, for the page and the saved .txt file."""
     lines = ["LAXTHYA-Ink signal probe", "=" * 24, ""]

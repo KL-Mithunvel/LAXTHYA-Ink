@@ -65,16 +65,21 @@
 
 <section id="start" hidden>
   <h1>Handwriting capture</h1>
-  <p class="muted">You will write short pieces of text with the Apple Pencil. Each piece is sent to the laptop as soon as you tap Next.</p>
+  <p class="muted">You will write short pieces of text with the Apple Pencil. Each piece is sent to the laptop as soon as you tap Next. Please read the information below, tick to accept, and type your name.</p>
   <div id="consentWarn" class="banner" hidden>The consent form still has [bracketed] blanks. Fill them in <code>docs/CONSENT_FORM.md</code> before real use.</div>
   <div id="consent"></div>
+  <h2>Your choice</h2>
   <label class="tick"><input type="checkbox" id="c1"><span><b>1. I agree</b> to my handwriting being recorded and used for this project, as described above. <span class="muted">(Required to take part.)</span></span></label>
   <label class="tick"><input type="checkbox" id="c2"><span><b>2. I also agree</b> that my recorded handwriting may be shared, without my name or note, with other researchers. <span class="muted">(Optional.)</span></span></label>
-  <h2>Operator</h2>
-  <label class="muted" for="note">Note about this writer (name or anything else; stays on this laptop and is never exported)</label>
-  <input type="text" id="note" autocomplete="off" maxlength="500">
-  <label class="tick" style="font-size:15px"><input type="checkbox" id="protector"><span>A paper-texture screen protector is fitted</span></label>
-  <div class="row"><button class="primary" id="startBtn" disabled>Start writing</button><span id="startErr" class="err"></span></div>
+  <h2>Your name</h2>
+  <label class="muted" for="name">Type your name. It is kept only on the laptop and is never shared or put in backups.</label>
+  <input type="text" id="name" autocomplete="name" maxlength="100" placeholder="Your name">
+  <details style="margin-top:14px"><summary class="muted">For the operator (optional)</summary>
+    <label class="muted" for="note">Note about this writer (anything useful; stays on the laptop, never exported)</label>
+    <input type="text" id="note" autocomplete="off" maxlength="500">
+    <label class="tick" style="font-size:15px"><input type="checkbox" id="protector"><span>A paper-texture screen protector is fitted</span></label>
+  </details>
+  <div class="row"><button class="primary" id="startBtn" disabled>I accept &ndash; start writing</button><span id="startErr" class="err"></span></div>
   <h2>Already started before?</h2>
   <div class="row"><input type="text" id="resumeId" placeholder="Writer ID, e.g. W003" style="max-width:220px" autocomplete="off"><button id="resumeBtn">Resume</button></div>
   <p class="muted">Only the Apple Pencil writes. Touching the screen with your hand is ignored.</p>
@@ -82,6 +87,7 @@
 
 <section id="write" hidden>
   <div id="bar">
+    <span id="who" class="muted"></span>
     <div id="progress"><span id="progressText"></span><div class="track"><div class="fill" id="fill"></div></div></div>
     <span id="status" class="ok">&#10003; all saved to the laptop</span>
     <button id="dl" hidden>Download unsent</button>
@@ -100,7 +106,7 @@
 const $ = id => document.getElementById(id);
 const allowMouse = new URLSearchParams(location.search).has("mouse");   // desktop testing only
 const JSON_HEADERS = { "Content-Type": "application/json" };
-const S = { writerId: null, sessionId: null, done: new Set(), idx: -1, events: [], starts: [], drawing: false,
+const S = { writerId: null, writerName: "", sessionId: null, done: new Set(), idx: -1, events: [], starts: [], drawing: false,
             shownIntro: new Set(), sinceBreak: 0, pending: 0, rejected: 0, finished: false,
             liveBuf: [], liveReplace: false };
 let P = null;                                   // the prompt set
@@ -217,17 +223,30 @@ function fit() {
   ctx.strokeStyle = getComputedStyle(document.body).color;
   redraw();
 }
-function seg(a, b) {
-  ctx.lineWidth = 1 + 5 * (b.pressure || 0.3);
-  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-}
+// Ink draws a stroke as smooth curves through the midpoints of consecutive samples. This is display only:
+// the recorded samples are never altered. `last` is the latest sample, `mid` where the last curve ended.
+const ink = {
+  last: null, mid: null,
+  begin(p) { this.last = p; this.mid = p; },
+  add(p) {
+    if (!this.last) return;
+    const m = { x: (this.last.x + p.x) / 2, y: (this.last.y + p.y) / 2 };
+    ctx.lineWidth = 1 + 5 * (p.pressure || 0.3);
+    ctx.beginPath(); ctx.moveTo(this.mid.x, this.mid.y); ctx.quadraticCurveTo(this.last.x, this.last.y, m.x, m.y); ctx.stroke();
+    this.mid = m; this.last = p;
+  },
+  end() {
+    if (this.last) { ctx.lineWidth = 1 + 5 * (this.last.pressure || 0.3); ctx.beginPath(); ctx.moveTo(this.mid.x, this.mid.y); ctx.lineTo(this.last.x, this.last.y); ctx.stroke(); }
+    this.last = this.mid = null;
+  },
+};
 function redraw() {
   const r = canvas.getBoundingClientRect(); ctx.clearRect(0, 0, r.width, r.height);
-  let last = null;
+  ink.last = ink.mid = null;
   for (const e of S.events) {
-    if (e.k === "pointerdown") last = e;
-    else if (e.k === "pointermove" && e.b > 0 && last) { seg(last, e); last = e; }
-    else if (e.k === "pointerup" || e.k === "pointercancel") last = null;
+    if (e.k === "pointerdown") ink.begin(e);
+    else if (e.k === "pointermove" && e.b > 0) ink.add(e);        // unpressed samples are hover, never ink
+    else if (e.k === "pointerup" || e.k === "pointercancel") ink.end();
   }
 }
 window.addEventListener("resize", () => { if (!$("write").hidden) fit(); });
@@ -241,12 +260,15 @@ function onPointer(e) {
   e.preventDefault();
   if (!accept(e) || S.idx < 0 || !$("overlay").hidden) return;
   const r = canvas.getBoundingClientRect(), ev = snap(e, r);
-  if (e.type === "pointerdown") { canvas.setPointerCapture(e.pointerId); S.starts.push(S.events.length); S.drawing = true; }
-  else if (e.type === "pointermove" && e.buttons > 0 && !S.drawing) return;
-  const prev = S.events.length ? S.events[S.events.length - 1] : null;
+  if (e.type === "pointerdown") {
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* the pointer is already gone: keep drawing, never lose the stroke */ }
+    S.starts.push(S.events.length); S.drawing = true; ink.begin(ev);
+  }
+  else if (e.type === "pointermove" && e.buttons > 0) { if (!S.drawing) return; ink.add(ev); }
+  else if (e.type === "pointerup" || e.type === "pointercancel") { if (S.drawing) ink.end(); S.drawing = false; }
+  // An unpressed move is hover. Inside a stroke it is a stale hover sample that Safari delivered late (its time is
+  // earlier than the pen-down): it is recorded like every sample but must neither be drawn nor end the line.
   S.events.push(ev); S.liveBuf.push(ev);
-  if (e.type === "pointermove" && e.buttons > 0 && prev && (prev.k === "pointerdown" || (prev.k === "pointermove" && prev.b > 0))) seg(prev, ev);
-  if (e.type === "pointerup" || e.type === "pointercancel") S.drawing = false;
 }
 for (const t of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) canvas.addEventListener(t, onPointer, { passive: false });
 for (const t of ["contextmenu", "gesturestart", "selectstart"]) document.addEventListener(t, e => e.preventDefault());
@@ -302,8 +324,9 @@ async function maybeFinish() {
 }
 
 // ---------- start / resume ----------
-const tick = () => { $("startBtn").disabled = !$("c1").checked; };
+const tick = () => { $("startBtn").disabled = !($("c1").checked && $("name").value.trim()); };
 $("c1").onchange = tick;
+$("name").oninput = tick;
 function deviceInfo() {
   return { userAgent: navigator.userAgent, screen: `${screen.width}x${screen.height}`, devicePixelRatio: window.devicePixelRatio,
            viewport: `${innerWidth}x${innerHeight}`, maxTouchPoints: navigator.maxTouchPoints };
@@ -313,6 +336,7 @@ async function beginSession() {
   S.sessionId = r.session_id; S.done = new Set(r.done_chunks);
   for (const it of await idb.all()) if (it.sessionId === S.sessionId) S.done.add(it.chunkId);   // written, still being sent
   localStorage.setItem("laxthya.resume", S.writerId);
+  $("who").textContent = (S.writerName ? S.writerName + " \u00B7 " : "") + S.writerId;
   $("start").hidden = true; $("write").hidden = false;
   S.idx = nextIndex(0);
   await refreshPending();
@@ -323,9 +347,12 @@ async function beginSession() {
 $("startBtn").onclick = async () => {
   $("startErr").textContent = ""; $("startBtn").disabled = true;
   try {
-    const w = await post("/api/writers", { consent_project: $("c1").checked, consent_sharing: $("c2").checked, note: $("note").value });
-    S.writerId = w.writer_id;
-    await beginSession();
+    const w = await post("/api/writers", { consent_project: $("c1").checked, consent_sharing: $("c2").checked,
+                                           name: $("name").value, note: $("note").value });
+    S.writerId = w.writer_id; S.writerName = w.name;
+    card("<h2>Welcome, " + esc(w.name) + "</h2><p>Your writer ID is</p><div class='big'>" + esc(w.writer_id) +
+         "</div><p class='muted'>Write it down. You will need it if you want to continue later.</p>", "Start writing",
+         () => beginSession().catch(e => { $("startErr").textContent = e.message; tick(); }));
   } catch (e) { $("startErr").textContent = e.message; tick(); }
 };
 $("resumeBtn").onclick = async () => {

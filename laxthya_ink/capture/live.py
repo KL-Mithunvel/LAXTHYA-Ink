@@ -30,14 +30,14 @@ class LiveFeed:
 
     def append(
         self, session_id: int, writer_id: str, chunk_id: str, text: str, events: list[dict],
-        *, replace: bool = False, canvas: dict | None = None,
+        *, replace: bool = False, canvas: dict | None = None, writer_name: str = "",
     ) -> int:
         """Add a batch from the page. `replace=True` first clears what the monitor shows for
         this session (the writer undid or cleared strokes). Returns the new cursor."""
         with self._lock:
             now = self._clock()
             meta = self._sessions.setdefault(session_id, {"session_id": session_id, "events": 0})
-            meta.update(writer_id=writer_id, chunk_id=chunk_id, text=text, last_seen=now)
+            meta.update(writer_id=writer_id, writer_name=writer_name, chunk_id=chunk_id, text=text, last_seen=now)
             if canvas:
                 meta["canvas"] = canvas
             if replace:

@@ -45,10 +45,11 @@ def test_replace_inserts_a_reset_marker_first():
 
 def test_sessions_report_liveness_and_idle_time():
     feed, clock = _feed(idle_s=10)
-    feed.append(7, "W002", "c9", "hello", [_ev(0)], canvas={"w": 800, "h": 500})
+    feed.append(7, "W002", "c9", "hello", [_ev(0)], canvas={"w": 800, "h": 500}, writer_name="Bo")
     clock.now = 4
     s = feed.read(0)["sessions"][0]
     assert (s["session_id"], s["writer_id"], s["chunk_id"], s["text"]) == (7, "W002", "c9", "hello")
+    assert s["writer_name"] == "Bo"
     assert s["live"] is True and s["idle_s"] == 4 and s["canvas"] == {"w": 800, "h": 500} and s["events"] == 1
     clock.now = 30
     assert feed.read(0)["sessions"][0]["live"] is False

@@ -16,16 +16,17 @@ Uploads are saved under server-chosen names, never names from the client.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from ..config import resolve_path as resolve_dir
 from ..exceptions import ConsentRequiredError, ProbeDataError, StoreError
 from .live import LiveFeed
-from .probe import format_report, summarise
+from .probe import extract_paths, format_report, summarise
 from .prompts import load_prompt_set
 from .store import Store
 
@@ -33,6 +34,9 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 CONSENT_DOC = "docs/CONSENT_FORM.md"
 #: addresses treated as "the laptop itself"
 LOCAL_HOSTS = ("127.0.0.1", "::1")
+MAX_NAME_CHARS = 100
+#: probe upload names are server-made (`probe-<date>-<time>`); nothing else is ever opened
+_PROBE_NAME_RE = re.compile(r"^probe-\d{8}-\d{6}$")
 
 
 def consent_text(path: Path) -> str:
@@ -101,6 +105,10 @@ def create_app(
     def monitor_page() -> FileResponse:
         return page("monitor.html")
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> Response:
+        return Response(status_code=204)             # browsers ask for one; there is none, and that is fine
+
     @app.get("/api/health")
     def health() -> dict:
         return {"ok": True}
@@ -145,16 +153,22 @@ def create_app(
     @app.post("/api/writers")
     async def create_writer(request: Request) -> dict:
         data = await json_body(request)
+        name = str(data.get("name", "")).strip()
+        if not name:
+            raise HTTPException(422, "please type your name")
+        if len(name) > MAX_NAME_CHARS:
+            raise HTTPException(422, f"the name is longer than {MAX_NAME_CHARS} characters")
         try:
             writer_id = store.add_writer(
                 consent_project=data.get("consent_project") is True,
                 consent_sharing=data.get("consent_sharing") is True,
                 consent_version=cap["consent_version"],
+                name=name,
                 note=str(data.get("note", ""))[:500],
             )
         except ConsentRequiredError as exc:
             raise HTTPException(422, str(exc)) from exc
-        return {"writer_id": writer_id, "consent_version": cap["consent_version"]}
+        return {"writer_id": writer_id, "name": name, "consent_version": cap["consent_version"]}
 
     @app.post("/api/sessions")
     async def start_or_resume_session(request: Request) -> dict:
@@ -222,6 +236,7 @@ def create_app(
         cursor = live.append(
             session_id, session["writer_id"], str(data.get("chunk_id", ""))[:64],
             str(data.get("text", ""))[:500], events, replace=data.get("replace") is True, canvas=canvas,
+            writer_name=store.get_writer(session["writer_id"])["name"],
         )
         return {"cursor": cursor}
 
@@ -255,7 +270,7 @@ def create_app(
         session = session_or_404(session_id)
         writer = store.get_writer(session["writer_id"])
         return {
-            "session": session, "note": writer["note"], "total_chunks": total_chunks,
+            "session": session, "name": writer["name"], "note": writer["note"], "total_chunks": total_chunks,
             "chunks": [
                 {**c, "section": chunks_by_id.get(c["chunk_id"], {}).get("section", "")}
                 for c in store.chunk_info(session_id)
@@ -266,5 +281,66 @@ def create_app(
     def monitor_strokes(session_id: int, chunk: int | None = None) -> dict:
         session_or_404(session_id)
         return {"strokes": store.read_strokes(session_id, chunk)}
+
+    @app.get("/api/monitor/overview", dependencies=[monitor])
+    def monitor_overview(writer: str = "") -> dict:
+        """What has been collected: totals, and - for one writer - progress through each section."""
+        out: dict = {
+            "totals": {**store.totals(), "probes": len(list(out_dir.glob("probe-*.json"))) if out_dir.exists() else 0},
+            "prompt_set": {"id": prompt_set["id"], "chunks": total_chunks, "estimated_minutes": prompt_set["estimated_minutes"]},
+            "writer": None, "sections": [],
+        }
+        if writer:
+            try:
+                out["writer"] = store.get_writer(writer)
+                collected = store.collected_chunk_ids(writer)
+            except StoreError as exc:
+                raise HTTPException(404, str(exc)) from exc
+            sections: dict[str, dict] = {}
+            for c in prompt_set["chunks"]:
+                s = sections.setdefault(c["section"], {"section": c["section"], "total": 0, "done": 0})
+                s["total"] += 1
+                s["done"] += c["id"] in collected
+            out["sections"] = list(sections.values())
+        return out
+
+    def probe_payload(name: str) -> tuple[Path, dict]:
+        if not _PROBE_NAME_RE.match(name):
+            raise HTTPException(404, "unknown probe")
+        path = out_dir / f"{name}.json"
+        try:
+            return path, json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "unknown probe") from exc
+        except (OSError, ValueError) as exc:
+            raise HTTPException(422, f"cannot read {name}: {exc}") from exc
+
+    @app.get("/api/monitor/probes", dependencies=[monitor])
+    def monitor_probes() -> list[dict]:
+        items: list[dict] = []
+        for path in sorted(out_dir.glob("probe-*.json"), reverse=True) if out_dir.exists() else []:
+            if not _PROBE_NAME_RE.match(path.stem):
+                continue
+            try:
+                summary = summarise(json.loads(path.read_text(encoding="utf-8")))
+            except (OSError, ValueError, ProbeDataError) as exc:
+                items.append({"name": path.stem, "error": str(exc)})
+                continue
+            pen = summary["timing"].get("pen", {})
+            items.append({
+                "name": path.stem, "events": summary["event_count"], "pen_events": summary["by_pointer_type"].get("pen", 0),
+                "rate_hz": round(pen["rate_hz"]) if "rate_hz" in pen else None, "size_kb": round(path.stat().st_size / 1024),
+            })
+        return items
+
+    @app.get("/api/monitor/probes/{name}", dependencies=[monitor])
+    def monitor_probe(name: str) -> dict:
+        _, payload = probe_payload(name)
+        try:
+            summary = summarise(payload)
+            paths = extract_paths(payload)
+        except ProbeDataError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"name": name, "report": format_report(summary), **paths}
 
     return app

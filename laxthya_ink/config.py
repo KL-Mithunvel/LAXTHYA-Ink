@@ -33,6 +33,8 @@ _NUMERIC_KEYS: tuple[tuple[str, str], ...] = (
     ("prompts", "seed"), ("prompts", "pair_min"), ("prompts", "glyph_repeats"),
     ("prompts", "chunk_units"), ("prompts", "line_units"), ("prompts", "writing_units_per_minute"),
     ("prompts", "break_every_chunks"), ("prompts", "max_pending_chunks"),
+    ("prompts", "pool_size"), ("prompts", "natural_min_words"), ("prompts", "min_word_length"),
+    ("prompts", "max_consonant_run"),
 )
 
 #: (section, key) pairs that must be present and a non-empty string.
@@ -40,7 +42,7 @@ _STRING_KEYS: tuple[tuple[str, str], ...] = (
     ("printer", "port"),
     ("capture", "host"), ("capture", "probe_dir"),
     ("capture", "db_path"), ("capture", "backup_dir"), ("capture", "consent_version"),
-    ("capture", "prompt_set_id"),
+    ("capture", "prompt_set_id"), ("prompts", "word_list"),
 )
 
 #: (section, key) pairs that must be present and boolean.
@@ -66,6 +68,8 @@ _POSITIVE_KEYS: tuple[tuple[str, str], ...] = (
     ("prompts", "pair_min"), ("prompts", "glyph_repeats"), ("prompts", "chunk_units"),
     ("prompts", "line_units"), ("prompts", "writing_units_per_minute"),
     ("prompts", "break_every_chunks"), ("prompts", "max_pending_chunks"),
+    ("prompts", "pool_size"), ("prompts", "natural_min_words"), ("prompts", "min_word_length"),
+    ("prompts", "max_consonant_run"),
 )
 
 #: numeric keys that must be >= 0

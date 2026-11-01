@@ -8,8 +8,9 @@ Decisions this implements (docs/PROJECT_PLAN.md -> Storage, Data handling):
 * **Consent is part of the writer.** Project use is required (no writer exists without
   it); research sharing is a separate optional tick. Both, the consent text version and
   the time are stored.
-* **The free-text `note` never leaves the database by default.** It may hold a name, so
-  exports and backups omit it unless `include_note=True` is passed deliberately.
+* **The writer's `name` and the operator's `note` never leave the database by default.**
+  Both are private to the laptop: exports and backups omit them unless
+  `include_private=True` is passed deliberately, so shared data stays anonymous.
 * **Writer IDs (`W001`, ...) are never reused**, so a deleted writer's ID cannot be
   mistaken for a new person's on old paper records.
 * **Deleting a writer removes everything**: database rows and their backup files.
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS writer_seq (n INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE IF NOT EXISTS writers (
     id TEXT PRIMARY KEY CHECK (id GLOB 'W[0-9][0-9][0-9]*'),
     created_at TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
     note TEXT NOT NULL DEFAULT '',
     consent_project INTEGER NOT NULL CHECK (consent_project = 1),
     consent_sharing INTEGER NOT NULL CHECK (consent_sharing IN (0, 1)),
@@ -152,8 +154,12 @@ def _group_strokes(samples) -> list[dict]:
     """Group ordered samples into strokes: `{"ids": [...], "t0": .., "t1": .., "done": bool}`.
 
     A stroke runs from a `pointerdown` through the pressed moves to a `pointerup`
-    (done) or a `pointercancel` / an unpressed move (not done). Samples outside any
-    stroke are hover samples and belong to no group.
+    (done) or a `pointercancel` (not done). Samples outside any stroke are hover
+    samples and belong to no group.
+
+    An *unpressed* move inside an open stroke is neither part of it nor its end: Safari
+    delivers hover samples late, so one stamped earlier than the pen-down can arrive just
+    after it. Treating it as a lift would cut the stroke short and drop the rest of it.
     """
     groups: list[dict] = []
     current: dict | None = None
@@ -169,8 +175,10 @@ def _group_strokes(samples) -> list[dict]:
             current["t1"] = s["t"]
             current["done"] = s["kind"] == "pointerup"
             current = None
+        elif current is not None and s["kind"] == "pointermove" and s["buttons"] == 0:
+            continue                          # a stale hover sample that arrived late: ignore it
         else:
-            current = None                    # hover (or a stray event) ends an open stroke
+            current = None                    # a stray event ends an open stroke
     return groups
 
 
@@ -184,6 +192,9 @@ class Store:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript(_SCHEMA)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(writers)")}
+            if "name" not in columns:                   # database made before writers could give a name
+                conn.execute("ALTER TABLE writers ADD COLUMN name TEXT NOT NULL DEFAULT ''")
 
     @classmethod
     def from_config(cls, config: dict) -> "Store":
@@ -204,9 +215,11 @@ class Store:
     # --- writers ---------------------------------------------------------
 
     def add_writer(
-        self, *, consent_project: bool, consent_sharing: bool, consent_version: str, note: str = ""
+        self, *, consent_project: bool, consent_sharing: bool, consent_version: str, name: str = "", note: str = ""
     ) -> str:
-        """Register a writer and return their ID. Refuses without project-use consent."""
+        """Register a writer and return their ID. Refuses without project-use consent.
+
+        `name` is what the writer typed about themselves; `note` is the operator's. Both stay private."""
         if consent_project is not True:
             raise ConsentRequiredError("a writer cannot be added without consent to project use")
         with self._conn() as conn:
@@ -214,9 +227,9 @@ class Store:
             writer_id = f"W{number:03d}"
             now = _now()
             conn.execute(
-                "INSERT INTO writers (id, created_at, note, consent_project, consent_sharing,"
-                " consent_version, consent_at) VALUES (?, ?, ?, 1, ?, ?, ?)",
-                (writer_id, now, note, int(bool(consent_sharing)), consent_version, now),
+                "INSERT INTO writers (id, created_at, name, note, consent_project, consent_sharing,"
+                " consent_version, consent_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
+                (writer_id, now, name.strip(), note, int(bool(consent_sharing)), consent_version, now),
             )
         return writer_id
 
@@ -434,12 +447,29 @@ class Store:
             for g in _group_strokes(rows)
         ]
 
+    def totals(self) -> dict:
+        """Counts across everything collected: writers, sessions, stored chunks and samples."""
+        with self._conn() as conn:
+            return {
+                "writers": conn.execute("SELECT COUNT(*) FROM writers").fetchone()[0],
+                "sessions": conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0],
+                "chunks": conn.execute("SELECT COUNT(*) FROM session_chunks").fetchone()[0],
+                "samples": conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0],
+            }
+
+    def collected_chunk_ids(self, writer_id: str) -> set[str]:
+        """Every chunk this writer has written, across all their sessions."""
+        with self._conn() as conn:
+            return {r["chunk_id"] for r in conn.execute(
+                "SELECT DISTINCT c.chunk_id FROM session_chunks c JOIN sessions s ON s.id = c.session_id"
+                " WHERE s.writer_id = ?", (_check_writer_id(writer_id),))}
+
     # --- backup / export / delete ---------------------------------------
 
-    def export_session(self, session_id: int, *, include_note: bool = False) -> Path:
+    def export_session(self, session_id: int, *, include_private: bool = False) -> Path:
         """Write one session as gzip JSON under `backup_dir/<writer id>/` and return the path.
 
-        The writer's `note` is left out unless `include_note=True`.
+        The writer's `name` and `note` are left out unless `include_private=True`.
         """
         with self._conn() as conn:
             session = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
@@ -451,8 +481,9 @@ class Store:
             samples = [dict(r) for r in conn.execute(
                 "SELECT seq, prompt_seq, stroke_id, kind, pointer_type, buttons, t, x, y, pressure, tilt_x,"
                 " tilt_y, altitude, azimuth FROM samples WHERE session_id = ? ORDER BY seq", (session_id,))]
-        if not include_note:
+        if not include_private:
             writer.pop("note")
+            writer.pop("name")
         session = dict(session)
         session["device"] = json.loads(session["device"])
 

@@ -5,6 +5,10 @@
 
 
 ## Done
+- [x] Ink skips fixed (2026-10-31) — cause: stale unpressed hover samples inside strokes (34 in 59 strokes of the recordings); stroke grouping, probe archive, monitor live view and the capture page now ignore them; the old grouping kept only 40% of stroke samples on the real recordings. Capture page also draws smooth curves. Verified in a real browser (40 checks) and with regression tests (254 pass). Owner to confirm on the iPad.
+- [x] Writer name on the tablet (2026-10-31) — consent text, accept tick(s) and the writer's own name on the iPad page; name shown on the laptop monitor; private to the laptop (not in backups, not returned to the tablet); consent version 2026-10-31-v2; old databases upgraded in place; 249 tests green.
+- [x] Control text option B (2026-10-31) — real words only, natural pairs covered twice (317 pairs, 229 words), no filler strings; core is 52 chunks and about 53 minutes (was 64 and 67.5); `tools/fetch_wordlist.py`; 240 tests green.
+- [x] Monitor archive of old data (2026-10-31) — overview of what is collected (totals, per-section progress for a writer) and the saved signal probes drawn with their hover trails.
 - [x] Capture app + laptop monitor (2026-10-30) — control text builder with coverage check (64 chunks), chunked idempotent uploads with offline queue and resume, live feed, archive browser, laptop-only guard; 207 tests green; API smoke-tested end to end on the real server. Pages not yet run on the iPad.
 - [x] Capture storage (2026-10-30) — `capture/store.py` (writers + consent + note, sessions, prompts, raw samples, derived strokes, backup export, full deletion) and a draft consent form; 162 tests green.
 - [x] Signal probe run twice on the iPad Pro M4 + Pencil Pro (2026-10-30); decision: build the capture app on the web route (PROJECT_PLAN → Capture route). Fixed two bugs found on the way (sample-rate analysis, ink offset).
@@ -19,8 +23,11 @@
 - [x] ~~Merge `main` into `machine-vision`~~ — CANCELLED. The owner keeps the two branches as separate personal copies and never merges them. Added a "Branch Policy" section to `.CLAUDE/CLAUDE.md` so future AI sessions know.
 
 ## Not Started
+- [ ] 🟡 Owner to try writing on the iPad again and say whether the skips are gone (the cause was found in the recordings and fixed, but not yet felt on the device).
+- [ ] 🟢 Keep the real-browser test (Playwright with Edge) as a repo dev tool under `tools/`: it found a real bug in its own harness and checks the whole flow; needs an npm dependency and the browser path in config.
 - [ ] 🟡 Run `/capture` on the iPad Pro M4 and `/monitor` on the laptop together; fix whatever the first real run shows (the pages are untested in a browser).
-- [ ] 🟡 **Owner decision:** control text size/gibberish - options A/B/C in docs/PROJECT_PLAN.md (recommend B: natural pairs only; needs a bigger word list); also Tamil repeats (3 vs 2) and grantha letters.
+- [ ] 🟡 **Owner decision:** Tamil repeats (3 gives 20.6 min, 2 about 14) and whether to add the grantha letters (ஜ ஷ ஸ ஹ க்ஷ).
+- [ ] 🟡 Extended-tier English text for the 359 deferred rare pairs (only if the writer's text needs them).
 - [ ] 🟡 Measure real writing speed on the first writer and replace the 90 units/min assumption; verify `capture.mm_per_css_px` with a ruler.
 - [ ] 🟢 Extended-tier prompt sets: cursive and print (English only, every pair once), common words and triples.
 - [ ] 🟢 Monitor: replay a chunk animated from its timestamps.

@@ -27,6 +27,11 @@ def test_index_serves_the_probe_page(client_and_dir):
     assert r.headers["cache-control"] == "no-store"
 
 
+def test_favicon_request_is_answered_quietly(client_and_dir):
+    r = client_and_dir[0].get("/favicon.ico")
+    assert r.status_code == 204 and r.content == b""
+
+
 def test_health(client_and_dir):
     assert client_and_dir[0].get("/api/health").json() == {"ok": True}
 

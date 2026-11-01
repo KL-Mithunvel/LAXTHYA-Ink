@@ -75,8 +75,8 @@ capture:
   live_idle_s: 20            # a session counts as "live" on the monitor if it sent pen events this recently
   db_path: data/capture.db        # SQLite store of writers, sessions and raw pen samples (git-ignored)
   backup_dir: data/backup         # compressed JSON copy of each session, one folder per writer (git-ignored)
-  consent_version: "2026-10-30-v1" # bump whenever docs/CONSENT_FORM.md changes; stored with each writer
-  prompt_set_id: core-v1           # which generated control text the capture app serves (capture/prompts/<id>.json)
+  consent_version: "2026-10-31-v2" # bump whenever docs/CONSENT_FORM.md changes; stored with each writer
+  prompt_set_id: core-v2           # which generated control text the capture app serves (capture/prompts/<id>.json)
   mm_per_css_px: 0.1924            # ASSUMED from the iPad Pro 11in (264 ppi, 2x scale): 25.4 / 132. Verify with a ruler
                                    # and override in config.local.yaml; stored with every session
 
@@ -85,7 +85,16 @@ capture:
 # and bump capture.consent_version only if the consent wording changed.
 prompts:
   seed: 20261030                   # fixed so the text is reproducible; reshuffles word/glyph order
-  pair_min: 2                      # every in-word lowercase letter pair appears at least this often
+  # English comes from real words only. A letter pair is "natural" if at least natural_min_words words of the
+  # word list contain it; every natural pair is covered pair_min times. Rare pairs (bq, dq, ...) are left to the
+  # extended session instead of being padded with made-up strings.
+  word_list: data/wordlists/google-10000-english-no-swears.txt   # git-ignored; get it with tools/fetch_wordlist.py
+  pool_size: 3000                  # use at most this many of the most frequent words (further down the list are brands and acronyms)
+  natural_min_words: 3             # a pair is natural if this many pool words contain it
+  min_word_length: 4               # shorter entries (of, to, tv, usb, ...) are not used
+  max_consonant_run: 3             # a word needs a vowel (a e i o u y) and no more than this many consonants in a row,
+                                   # which drops acronyms such as gtk, wto, xhtml
+  pair_min: 2                      # every natural lowercase letter pair appears at least this often
   glyph_repeats: 3                 # each Greek letter, math symbol, punctuation mark, digit and Tamil letter
   chunk_units: 90                  # writing effort per chunk (1 unit = one Latin character); about a minute
   line_units: 30                   # writing effort per printed line

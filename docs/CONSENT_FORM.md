@@ -1,6 +1,6 @@
 # LAXTHYA-Ink — Handwriting Capture Consent
 
-**Version:** `2026-10-30-v1` (must match `capture.consent_version` in `config.yaml`; bump both whenever this text changes.)
+**Version:** `2026-10-31-v2` (must match `capture.consent_version` in `config.yaml`; bump both whenever this text changes.)
 
 > **DRAFT for the owner to review before first use.** Items in [brackets] are for the owner to fill in. This is plain-language wording, not legal advice. Check the data-protection rules that apply where you and the writers live, and whether writers under 18 need a guardian's consent.
 
@@ -14,7 +14,7 @@
 
 - The movement of the pencil: its position, the time, how hard you press, and its tilt, many times a second. This includes the movement just above the screen between strokes.
 - The texts you were asked to write, which writing style you were asked for (natural, cursive, or printed), and the iPad and Pencil used.
-- A writer ID such as `W001`. The operator may also keep a private **note** about you (for example your name). The note is kept only in the operator's database. It is **never** put in backups or shared files.
+- **Your name**, which you type in on the tablet, and a writer ID such as `W001`. The operator may also add a private **note** about you. Your name and the note are kept only in the operator's database on the laptop. They are **never** put in backups or shared files.
 
 Nothing is recorded by a camera or a microphone.
 
@@ -51,4 +51,4 @@ Writer ID: ______________  Date: ______________
 
 ## How the app records this
 
-The capture app shows this text and the two tick-boxes before the first stroke. It stores the writer ID, both choices, the consent version and the time. If box 1 is not ticked, the app does not create the writer (the database refuses it). Only writers who ticked box 2 are included in any shared export.
+The capture app shows this text and the two tick-boxes before the first stroke. It stores the writer ID, the name the writer typed, both choices, the consent version and the time. If box 1 is not ticked, the app does not create the writer (the database refuses it). Only writers who ticked box 2 are included in any shared export.

@@ -13,9 +13,9 @@ def store(tmp_path):
     return Store(tmp_path / "capture.db", tmp_path / "backup")
 
 
-def _writer(store, *, sharing=False, note=""):
+def _writer(store, *, sharing=False, note="", name=""):
     return store.add_writer(consent_project=True, consent_sharing=sharing,
-                            consent_version="test-v1", note=note)
+                            consent_version="test-v1", name=name, note=note)
 
 
 def _ev(kind, t, x=10.0, y=20.0, *, b=1, pt="pen", **fields):
@@ -40,7 +40,9 @@ def test_no_writer_without_project_consent(store):
 
 def test_database_itself_refuses_missing_project_consent(store):
     with sqlite3.connect(store.db_path) as conn, pytest.raises(sqlite3.IntegrityError):
-        conn.execute("INSERT INTO writers VALUES ('W009', 'now', '', 0, 0, 'v', 'now')")
+        conn.execute(
+            "INSERT INTO writers (id, created_at, consent_project, consent_sharing, consent_version, consent_at)"
+            " VALUES ('W009', 'now', 0, 0, 'v', 'now')")
 
 
 def test_deleted_writer_ids_are_never_reused(store):
@@ -165,22 +167,23 @@ def _session_with_data(store, writer):
     return sid
 
 
-def test_export_leaves_the_note_out_by_default(store):
-    w = _writer(store, note="Ann Example, ward 3")
+def test_export_leaves_the_name_and_note_out_by_default(store):
+    w = _writer(store, name="Ann Example", note="ward 3")
     path = store.export_session(_session_with_data(store, w))
     assert path.parent == store.backup_dir / w and path.name.endswith(".json.gz")
     text = gzip.open(path, "rt", encoding="utf-8").read()
-    assert "Ann Example" not in text
+    assert "Ann Example" not in text and "ward 3" not in text
     data = json.loads(text)
-    assert "note" not in data["writer"] and data["writer"]["id"] == w
+    assert "note" not in data["writer"] and "name" not in data["writer"] and data["writer"]["id"] == w
     assert data["session"]["device"] == {"ipad": "M4"}
     assert len(data["samples"]) == 9 and data["prompts"] == [{"seq": 1, "text": "hello"}]
 
 
-def test_export_can_include_the_note_when_asked(store):
-    w = _writer(store, note="Ann Example")
-    path = store.export_session(_session_with_data(store, w), include_note=True)
-    assert json.loads(gzip.open(path, "rt", encoding="utf-8").read())["writer"]["note"] == "Ann Example"
+def test_export_can_include_the_private_fields_when_asked(store):
+    w = _writer(store, name="Ann Example", note="ward 3")
+    path = store.export_session(_session_with_data(store, w), include_private=True)
+    writer = json.loads(gzip.open(path, "rt", encoding="utf-8").read())["writer"]
+    assert (writer["name"], writer["note"]) == ("Ann Example", "ward 3")
 
 
 def test_exporting_an_unknown_session_is_an_error(store):
@@ -209,3 +212,62 @@ def test_from_config_uses_the_configured_paths(config, tmp_path):
     config["capture"]["backup_dir"] = str(tmp_path / "bk")
     s = Store.from_config(config)
     assert s.db_path == tmp_path / "x.db" and s.backup_dir == tmp_path / "bk"
+
+
+# --- the writer's own name ---------------------------------------------------------
+
+def test_name_is_stored_trimmed_and_defaults_to_empty(store):
+    named, anonymous = _writer(store, name="  Ann Example  "), _writer(store)
+    assert store.get_writer(named)["name"] == "Ann Example"
+    assert store.get_writer(anonymous)["name"] == ""
+
+
+def test_a_database_made_before_names_existed_is_upgraded_in_place(store, tmp_path):
+    old_writer = _writer(store, note="kept")
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute("ALTER TABLE writers DROP COLUMN name")          # the shape of an older database
+    upgraded = Store(store.db_path, store.backup_dir)
+    assert upgraded.get_writer(old_writer)["name"] == "" and upgraded.get_writer(old_writer)["note"] == "kept"
+    new_writer = upgraded.add_writer(consent_project=True, consent_sharing=False, consent_version="v", name="Bo")
+    assert upgraded.get_writer(new_writer)["name"] == "Bo"
+    Store(store.db_path, store.backup_dir)                            # opening again is harmless
+
+
+# --- stale hover samples (the 'skips'): Safari delivers a hover sample stamped BEFORE the pen-down just after it ---------
+
+def _stale_sample_stroke():
+    """The exact shape seen in the iPad recordings: down at t=18085, then a late hover sample stamped 18077."""
+    return [
+        _ev("pointermove", 18060.0, b=0),
+        _ev("pointerdown", 18085.0, x=128.0, y=126.0),
+        _ev("pointermove", 18077.0, x=129.0, y=126.0, b=0),          # stale: earlier than the pen-down, unpressed
+        _ev("pointermove", 18106.0, x=128.0, y=126.0),
+        _ev("pointermove", 18122.0, x=128.0, y=124.0),
+        _ev("pointermove", 18130.0, x=128.0, y=123.0, b=0),          # a second stale one, mid-stroke
+        _ev("pointermove", 18139.0, x=128.0, y=122.0),
+        _ev("pointerup", 18150.0, x=128.0, y=122.0, b=0),
+    ]
+
+
+def test_a_stale_hover_sample_inside_a_stroke_does_not_cut_the_stroke_short(store):
+    sid = store.start_session(_writer(store), style="natural", prompt_set="core")
+    store.add_samples(sid, _stale_sample_stroke())
+    assert store.derive_strokes(sid) == 1
+    (stroke,) = store.read_strokes(sid)
+    assert stroke["completed"] is True
+    assert [p[3] for p in stroke["points"]] == [18085.0, 18106.0, 18122.0, 18139.0, 18150.0]   # every pressed sample + the up
+    with sqlite3.connect(store.db_path) as conn:
+        n, done = conn.execute("SELECT n_samples, completed FROM strokes").fetchone()
+        raw = conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
+    assert (n, done) == (5, 1)
+    assert raw == 8                                                   # nothing is thrown away: the stale samples stay in the raw record
+
+
+def test_hover_after_a_lost_pointerup_still_does_not_join_the_next_stroke(store):
+    sid = store.start_session(_writer(store), style="natural", prompt_set="core")
+    store.add_samples(sid, [_ev("pointerdown", 1.0), _ev("pointermove", 2.0), _ev("pointermove", 3.0, b=0),
+                            _ev("pointerdown", 9.0), _ev("pointermove", 10.0), _ev("pointerup", 11.0, b=0)])
+    assert store.derive_strokes(sid) == 2
+    first, second = store.read_strokes(sid)
+    assert first["completed"] is False and len(first["points"]) == 2      # never closed
+    assert second["completed"] is True and len(second["points"]) == 3

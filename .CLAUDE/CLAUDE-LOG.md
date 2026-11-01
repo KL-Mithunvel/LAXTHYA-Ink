@@ -1,5 +1,30 @@
 # Claude Log
 
+## 2026-10-31 — Ink skips: cause found in the recordings and fixed
+- Owner: "sometimes when I write it does skips". Checked the four probe recordings: few frame stalls, no pen dropouts or cancels, so not the pen or Safari being slow.
+- Found the cause: inside strokes Safari delivers unpressed `pointermove` samples whose timestamps are earlier than the sample before (stale hover samples arriving after the pen-down; 34 in 59 strokes). The capture page drew no segment into/out of them (holes, and strokes starting late); `store._group_strokes` ended the stroke there and dropped the rest (old logic kept 40% of stroke samples, left 34 of 59 strokes unclosed on the real recordings); the monitor live line and the probe archive had the same flaw. Earlier archive view of the probe strokes was truncated for this reason.
+- Fix: unpressed moves inside an open stroke are recorded but neither drawn nor treated as a lift, in all four places; `capture.html` now draws smooth midpoint curves (display only) and wraps `setPointerCapture` in try/catch. Added regression tests (stale-sample store/probe tests, one that checks no sample of the real recording is lost) and a stale-sample case in the real-browser test.
+- Real-browser testing (Playwright + Edge, scratchpad): first run 35/38, then 40/40; also checked the pages visually. Added a favicon route (browser 404 noise).
+- Mistake caught and corrected: my first performance measurement ("no stalls") was invalid because synthetic pen events made `setPointerCapture` throw, so nothing was drawn; after fixing and making the harness prove it draws (188,803 ink pixels), the result still holds in Edge (about 0.03 ms per sample, no long tasks, no frame gaps). It is not a measurement of Safari on the iPad.
+- 254 tests pass. Needs the owner to try the iPad again.
+
+## 2026-10-31 — Name entered on the tablet; laptop shows who is writing
+- Owner asked for acceptance of the consent and the writer's name to be entered on the tablet, and for the laptop to show live writing and what each user wrote before (the monitor's Live and Archive views already existed; names now appear in them).
+- `writers.name` column (migration `ALTER TABLE` when an older database lacks it; verified on the real, empty `data/capture.db`); `add_writer(name=)`; `POST /api/writers` requires a non-blank name up to 100 characters; `export_session(include_private=)` replaces `include_note` and drops both name and note by default; `LiveFeed` carries `writer_name`; monitor endpoints return names.
+- Privacy decision: no endpoint reachable from the tablet returns a name (writer IDs are short and guessable on the LAN), so a resumed session shows only the ID; names appear only on the laptop-only monitor. Tested.
+- Consent text now says the writer types their name, kept only on the laptop and never in backups or shared files; version bumped to 2026-10-31-v2 (config).
+- `capture.html`: start screen is consent text, 'Your choice' ticks, 'Your name' (required; Start stays disabled until the required tick and a name), optional 'For the operator' (note, protector); welcome card with the writer ID; 'name · ID' shown in the writing bar. `monitor.html`: names in the live list, archive list and overview.
+- 249 tests pass; node syntax check and element-id check pass for all three pages.
+
+## 2026-10-31 — Option B control text and the monitor's view of old data
+- Committed the capture app as f9629e7.
+- Owner chose option B for the English text. Downloaded the first20hours/google-10000-english (no-swears) list into a fresh folder, read its licence (research use allowed, redistribution unclear), so it is kept out of git under `data/wordlists/` with a pinned-checksum `tools/fetch_wordlist.py`; only the generated text is committed (it stores its natural pairs, so the coverage check needs no list).
+- Rewrote `capture/prompts.py`: pool = most frequent words, natural pairs = pairs in at least N words, greedy pick by gain per letter, fillers removed. First try (whole 10k list) picked acronyms (usb gtk wto pdt bmw xhtml); fixed by restricting to the top 3,000, 4+ letters, a vowel, at most 3 consonants in a row (config). Result `core-v2`: 52 chunks, 229 real words, 317 natural pairs x2, 359 rare pairs deferred, about 52.6 min (was 64 chunks, 67.5 min). Set id bumped to core-v2; core-v1.json removed (no data had been collected against it).
+- Owner also asked to view old collected data in the monitor. Added `/api/monitor/overview` (totals; one writer's progress per section), `/api/monitor/probes` and `/probes/{name}` (saved probe uploads: verdict, drawn strokes, hover trails; names validated), `Store.totals`/`collected_chunk_ids`, `probe.extract_paths`, and the page: Signal probes list, overview cards and per-section bars, probe drawing. A test caught a bug in my new `extract_paths` (a pressed move with no stroke was drawn as hover); fixed. All laptop-only.
+- Reviewed two further probe uploads (`probe-20261030-140902`/`140918`, the same 21 s session sent twice): roll still constant 0. Four uploads now; roll and squeeze treated as unavailable in Safari.
+- 240 tests pass. Not verified: the pages in a real browser or on the iPad; writing speed.
+- Dev note: two helper scripts failed their own safety asserts mid-way and partly applied (config edit; filter patch); both were detected, the partial state inspected and the remaining edits applied.
+
 ## 2026-10-30 — Capture storage and consent form
 - Committed the probe work as 05a202b.
 - Owner decisions: consent scope = project use + anonymised research sharing; consent recorded by tick-box in the app; each writer has a free-text note. Implemented sharing as a separate optional tick and kept the note out of all exports/backups by default (a name in it would break anonymity); both choices flagged to the owner and recorded in the plan.

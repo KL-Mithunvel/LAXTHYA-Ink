@@ -36,7 +36,7 @@ This repo holds **two independent copies** of the template, kept as separate bra
 
 ### Current status (2026-10-28)
 
-Phase 1 software is done and tested on the dev machine (207 tests): stroke file → layout → G-code → simulated printer → pen-path preview. **Nothing has run on the real printer yet.** The iPad **signal probe** ran twice on the iPad Pro M4 (results in the plan). The **capture app** (consent, writer/session, 64 one-minute chunks sent as written, offline queue, resume) and the **laptop monitor** (live feed + archive) are built and API-tested, but **their pages have not been run in a browser on the iPad yet** (JavaScript syntax-checked only). The control text is generated but its size is an open owner decision (plan -> Control text v1). No learning model exists yet. Design decisions from the grill session are in `docs/PROJECT_PLAN.md`.
+Phase 1 software is done and tested on the dev machine (254 tests): stroke file → layout → G-code → simulated printer → pen-path preview. **Nothing has run on the real printer yet.** The iPad **signal probe** ran twice on the iPad Pro M4 (results in the plan). The **capture app** (consent, writer/session, 64 one-minute chunks sent as written, offline queue, resume) and the **laptop monitor** (live feed + archive) are built and API-tested, but **their pages have not been run in a browser on the iPad yet** (JavaScript syntax-checked only). The control text (`core-v2`: 52 chunks, about 53 minutes, real English words only, 317 natural letter pairs) is generated; 359 rare pairs are deferred to the extended session (plan -> Control text v2). No learning model exists yet. Design decisions from the grill session are in `docs/PROJECT_PLAN.md`.
 
 ---
 
@@ -72,6 +72,7 @@ python main.py strokes.json --printer                         :: write for real
 
 :: iPad signal probe (capture server on the LAN; Ctrl+C to stop)
 python -m laxthya_ink.capture                                 :: iPad: /capture (writing app), /  (probe); laptop only: /monitor
+python tools\fetch_wordlist.py                                  :: one-time: download the English word list into data\wordlists\ (not committed)
 python -m laxthya_ink.capture.prompts                         :: regenerate the control text after changing config or the word list
 python -m laxthya_ink.capture.prompts --check                 :: verify the committed text is current and fully covered
 ```
@@ -102,7 +103,8 @@ Activate the venv before any Python command. `ruff`/`flake8` are not configured 
 | `laxthya_ink/capture/server.py` | FastAPI app: serves the probe page, receives uploads into `data/probe/` |
 | `laxthya_ink/capture/static/probe.html` | The iPad page (vanilla JS): records every pointer event with every field |
 | `laxthya_ink/capture/store.py` | SQLite store: writers (with consent and note), sessions, prompts, raw pen samples, derived strokes; JSON backup export; delete a writer completely |
-| `laxthya_ink/capture/prompts.py` | Builds the control text (English pairs, capitals, digits, punctuation, Greek, Tamil), splits it into ~1-minute chunks, checks coverage; `prompts/core-v1.json` is the committed output, `words_en.txt` its word list |
+| `laxthya_ink/capture/prompts.py` | Builds the control text (real English words covering the natural letter pairs, capitals, digits, punctuation, Greek, Tamil), splits it into ~1-minute chunks, checks coverage; `prompts/core-v2.json` is the committed output (it carries the natural pairs it covers, so the check needs no word list) |
+| `tools/fetch_wordlist.py` | Downloads the English frequency word list (SHA-256 pinned) into `data/wordlists/` |
 | `laxthya_ink/capture/live.py` | In-memory live feed (bounded buffer, cursor, gap detection); never saved |
 | `laxthya_ink/capture/static/capture.html` | The iPad writing app: consent, one chunk at a time, pen-only, Undo/Clear/Next, IndexedDB queue + retry, resume, live preview |
 | `laxthya_ink/capture/static/monitor.html` | Laptop monitor: Live tab and Archive tab |
@@ -138,8 +140,9 @@ Activate the venv before any Python command. `ruff`/`flake8` are not configured 
 - **`GcodeRunner(link, lines, config, lock=None)`** — `run()`, `pause()`, `resume()`, `cancel()`, `.paused/.cancelled/.finished/.sent_lines`. Raises `AckTimeout`, `PrinterError`, `ResendRequested`. Skips blank/comment-only lines. A cancel does **not** move the pen.
 - **`capture.probe.summarise(payload) -> dict`** / **`format_report(summary)`** — raises `ProbeDataError`. **`capture.server.create_app(config, probe_dir=None)`** — `GET /`, `GET /api/health`, `POST /api/probe` (400 bad JSON, 413 too large, 422 bad events); writes `probe-<timestamp>.json/.txt` under `capture.probe_dir`, server-chosen names only.
 - **`capture.store.Store(db_path, backup_dir)`** / `Store.from_config(config)` — `add_writer(consent_project, consent_sharing, consent_version, note)` → `W001`… (raises `ConsentRequiredError` without project consent; IDs never reused); `get_writer`, `set_note`, `list_writers`, `shareable_writer_ids`; `start_session(writer_id, style, prompt_set, device, mm_per_px, protector, measured_rate_hz)` (style in `natural/cursive/print/careful`); `add_prompt`; `add_samples(session_id, events, prompt_seq)` (skips touch, all-or-nothing); `derive_strokes(session_id)` (idempotent); `export_session(session_id, include_note=False)` → `backup_dir/<writer>/…json.gz`; `delete_writer(writer_id)` → counts, removes rows and backups. Raises `StoreError`.
-- **Capture API** (`capture.server.create_app(config, probe_dir=None, store=None, local_hosts=('127.0.0.1','::1'))`). iPad/LAN: `GET /capture`, `/api/prompts`, `/api/consent`; `POST /api/writers` (422 without project consent), `/api/sessions` (starts or resumes), `GET /api/sessions/{id}`, `POST /api/sessions/{id}/chunks/{chunk_id}` (idempotent; 404 unknown chunk, 422 empty), `/api/sessions/{id}/finish`, `/api/live/{id}`. **Laptop only (403 elsewhere):** `GET /monitor`, `/api/monitor/live?after=`, `/writers`, `/writers/{id}/sessions`, `/sessions/{id}`, `/sessions/{id}/strokes?chunk=`.
-- **Store additions:** `save_chunk`, `done_chunks`, `get_session`, `find_open_session`, `finalize_session`, `list_sessions`, `chunk_info`, `read_strokes`.
+- **Capture API** (`capture.server.create_app(config, probe_dir=None, store=None, local_hosts=('127.0.0.1','::1'))`). iPad/LAN: `GET /capture`, `/api/prompts`, `/api/consent`; `POST /api/writers` (needs `name`; 422 without a name or project consent), `/api/sessions` (starts or resumes), `GET /api/sessions/{id}`, `POST /api/sessions/{id}/chunks/{chunk_id}` (idempotent; 404 unknown chunk, 422 empty), `/api/sessions/{id}/finish`, `/api/live/{id}`. **Laptop only (403 elsewhere):** `GET /monitor`, `/api/monitor/live?after=`, `/writers`, `/writers/{id}/sessions`, `/sessions/{id}`, `/sessions/{id}/strokes?chunk=`, `/overview?writer=` (totals, and one writer's progress per section), `/probes` and `/probes/{name}` (saved signal-probe uploads with their drawable strokes and hover trails).
+- **Writer name:** `Store.add_writer(..., name, note)`; `name` and `note` are private (never in `export_session` unless `include_private=True`) and never returned by tablet-reachable endpoints; only the laptop-only `/api/monitor/*` returns them. `LiveFeed.append(..., writer_name)`.
+- **Store additions:** `totals`, `collected_chunk_ids`, `save_chunk`, `done_chunks`, `get_session`, `find_open_session`, `finalize_session`, `list_sessions`, `chunk_info`, `read_strokes`.
 - **`PrinterLink`** — `connect`, `disconnect`, `send_line`, `wait_ok`, `query_state`, `command`. Raises `PrinterConnectionError`, `AckTimeout`, `PrinterError`, `ResendRequested`.
 - **`SimPrinter(pen_contact_z, pen_offset, command_delay)`** — also exposes `.sent`, `.moves`, `.pen_segments` (pen-tip polylines while Z ≤ contact).
 - **`cli.execute(link, gcode, config)`** — runs the job; on any exception/interrupt it sends the safe-stop commands, then re-raises. **`cli.require_calibrated(config)`** raises `PenNotCalibratedError`.
@@ -153,6 +156,7 @@ Activate the venv before any Python command. `ruff`/`flake8` are not configured 
 - **Z heights:** `pen.down_z` = nozzle Z with the tip on the paper; pen-up = `down_z + lift_mm`; `park.safe_z` must clear pen-up. Example: down 5, lift 3 → up 8, safe 20.
 - **`pen.down_z_calibrated`** is `false` in the committed `config.yaml` and stays false; only `config.local.yaml` may set it true.
 - **Config precedence:** `config.local.yaml` (git-ignored, deep-merged) over `config.yaml`.
+- **Stroke membership:** a stroke is the samples from a `pointerdown` to its `pointerup`/`pointercancel`. An *unpressed* `pointermove` inside an open stroke is a stale hover sample Safari delivered late (its timestamp is earlier than the pen-down): it is kept in the raw record but is neither part of the stroke nor its end. Every consumer follows this (`store._group_strokes`, `probe.extract_paths`, the monitor's live view, the capture page's ink).
 - **Sentinels:** none. `None` for `t`/`pressure` means "not captured".
 - **Secrets:** this project has none today, so there is no `.env`/`.env.example`. Add both the moment an external service is used (CLAUDE-COMMON → Secrets & Credentials).
 
@@ -165,8 +169,9 @@ Activate the venv before any Python command. `ruff`/`flake8` are not configured 
 | `config.yaml` | yes | Defaults and placeholders only |
 | `config.local.yaml` | **no** | Real COM port, measured pen offset / Z |
 | `tests/data/sample_strokes.json` | yes | Tiny synthetic fixture (not anyone's handwriting) |
-| `data/capture.db`, `data/backup/` | **no** | Writers, consent, notes, raw samples; per-writer gzip JSON backups. **Personal data (Dev Rule 7).** The note may hold a name and is never in a backup |
-| `laxthya_ink/capture/prompts/core-v1.json` | yes | The generated control text (not personal data). Regenerate with `python -m laxthya_ink.capture.prompts`; a test fails if it is stale |
+| `data/capture.db`, `data/backup/` | **no** | Writers (typed name, note, consent), raw samples; per-writer gzip JSON backups. **Personal data (Dev Rule 7).** The name and note are never in a backup |
+| `laxthya_ink/capture/prompts/core-v2.json` | yes | The generated control text (not personal data). Regenerate with `python -m laxthya_ink.capture.prompts`; a test fails if it is stale (where the word list is present) |
+| `data/wordlists/` | **no** | The English frequency list and its licence (redistribution unclear). `python tools/fetch_wordlist.py` |
 | `data/probe/` | **no** | Signal-probe uploads (`probe-*.json` raw events, `probe-*.txt` verdict) |
 | `data/` | **no** | Generated G-code and previews; **all handwriting samples and trained models go here (Dev Rule 7)** |
 
@@ -207,7 +212,7 @@ Activate the venv before any Python command. `ruff`/`flake8` are not configured 
 - **`httpx` deprecation warning in tests:** Starlette's `TestClient` warns that using `httpx` is deprecated and suggests `httpx2`. Not changed yet - needs the owner's decision (deprecated-API rule). Affects `tests/test_capture_server.py` only.
 - **The capture server listens on the LAN (`capture.host: 0.0.0.0`) with no authentication.** The monitor and archive are laptop-only, but the iPad endpoints are open: anyone on the same network who knows a session number could post samples or create a writer. Acceptable at home while it runs; do not run it on a shared or public network.
 - **Capture and monitor pages are untested in a real browser** (only syntax-checked, and the API they call is tested). First iPad run may find layout or interaction bugs.
-- **Control text is too long and half-gibberish in English** (67 min, 269 fillers) - open owner decision, see `docs/PROJECT_PLAN.md`.
+- **Control text is still about 53 minutes** (Tamil alone is 21) and rests on an assumed 90 units/min. 359 rare letter pairs are deferred to the extended session. The English words come from a web list and include a few brand or proper-noun words. Regenerating needs the word list (`tools/fetch_wordlist.py`); tests that rebuild from it skip where it is absent.
 - **The live preview is not persisted** and a monitor that falls behind the 30,000-event buffer redraws from what is left.
 - **A session finished early cannot be resumed** (the page only calls finish at the last chunk; stopping mid-way leaves it open and resumable).
 - **No linter configured** (`ruff` recommended; flagged per CLAUDE-COMMON).

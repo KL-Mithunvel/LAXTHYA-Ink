@@ -7,10 +7,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from laxthya_ink.capture.prompts import load_prompt_set
+from laxthya_ink.config import load_config
 from laxthya_ink.capture.server import create_app
 from laxthya_ink.capture.store import Store
 
-PROMPTS = load_prompt_set("core-v1")
+PROMPTS = load_prompt_set(load_config()["capture"]["prompt_set_id"])
 CHUNK1, CHUNK2 = PROMPTS["chunks"][0]["id"], PROMPTS["chunks"][1]["id"]
 
 
@@ -33,7 +34,7 @@ def env(config, tmp_path):
 
 
 def _writer_and_session(client, **kw):
-    w = client.post("/api/writers", json={"consent_project": True, "consent_sharing": False, "note": "Ann"}).json()
+    w = client.post("/api/writers", json={"consent_project": True, "consent_sharing": False, "name": "Ann Example", "note": "ward 3"}).json()
     s = client.post("/api/sessions", json={"writer_id": w["writer_id"], "protector": True, **kw}).json()
     return w["writer_id"], s
 
@@ -44,15 +45,16 @@ def test_capture_page_and_prompts(env):
     client, *_ = env
     assert "Handwriting capture" in client.get("/capture").text
     ps = client.get("/api/prompts").json()
-    assert ps["id"] == "core-v1" and ps["chunks"] and ps["style"] == "natural"
+    assert ps["id"] == PROMPTS["id"] and ps["chunks"] and ps["style"] == "natural"
 
 
-def test_consent_text_is_what_writers_read_and_flags_blanks(env):
+def test_consent_text_is_what_writers_read_and_flags_blanks(env, config):
     client, *_ = env
     body = client.get("/api/consent").json()
     assert body["text"].startswith("## What this is")
     assert "Your choices" not in body["text"]
-    assert body["version"] == "2026-10-30-v1"
+    assert body["version"] == config["capture"]["consent_version"] == "2026-10-31-v2"
+    assert "type in on the tablet" in body["text"]          # the form tells writers about the name field
     assert body["has_placeholders"] is True          # the draft still has [brackets]
 
 
@@ -60,21 +62,22 @@ def test_consent_text_is_what_writers_read_and_flags_blanks(env):
 
 def test_no_writer_without_project_consent(env):
     client, store, _ = env
-    r = client.post("/api/writers", json={"consent_project": False, "consent_sharing": True})
+    r = client.post("/api/writers", json={"consent_project": False, "consent_sharing": True, "name": "Ann"})
     assert r.status_code == 422
     assert store.list_writers() == []
 
 
 def test_consent_must_be_literal_true(env):
     client, store, _ = env
-    assert client.post("/api/writers", json={"consent_project": "yes"}).status_code == 422
+    assert client.post("/api/writers", json={"consent_project": "yes", "name": "Ann"}).status_code == 422
     assert store.list_writers() == []
 
 
-def test_sharing_tick_is_stored_separately(env):
+def test_sharing_tick_is_stored_separately(env, config):
     client, store, _ = env
-    wid = client.post("/api/writers", json={"consent_project": True, "consent_sharing": True}).json()["writer_id"]
-    assert store.get_writer(wid)["consent_sharing"] == 1 and store.get_writer(wid)["consent_version"] == "2026-10-30-v1"
+    wid = client.post("/api/writers", json={"consent_project": True, "consent_sharing": True, "name": "Bo"}).json()["writer_id"]
+    assert store.get_writer(wid)["consent_sharing"] == 1
+    assert store.get_writer(wid)["consent_version"] == config["capture"]["consent_version"]
 
 
 def test_session_starts_then_resumes(env):
@@ -160,7 +163,8 @@ def test_finish_derives_strokes_and_writes_a_backup_without_the_note(env, tmp_pa
     assert store.get_session(sid)["ended_at"]
     assert client.post("/api/sessions", json={"writer_id": wid}).json()["resumed"] is False   # finished: next is a new one
     backups = list((tmp_path / "backup" / wid).glob("*.json.gz"))
-    assert len(backups) == 1 and "Ann" not in gzip.open(backups[0], "rt", encoding="utf-8").read()
+    backup_text = gzip.open(backups[0], "rt", encoding="utf-8").read()
+    assert len(backups) == 1 and "Ann Example" not in backup_text and "ward 3" not in backup_text
 
 
 # --- live feed and the laptop-only monitor ----------------------------------------
@@ -194,14 +198,15 @@ def test_monitor_reads_back_stored_data(env):
     client.post(f"/api/sessions/{sid}/chunks/{CHUNK2}", json={"events": _stroke(1.0) + _stroke(30.0)})
 
     writers = client.get("/api/monitor/writers").json()
-    assert writers[0]["id"] == wid and writers[0]["note"] == "Ann" and writers[0]["chunks_done"] == 2
+    assert writers[0]["id"] == wid and writers[0]["name"] == "Ann Example" and writers[0]["note"] == "ward 3"
+    assert writers[0]["chunks_done"] == 2
 
     sess = client.get(f"/api/monitor/writers/{wid}/sessions").json()
     assert sess["total_chunks"] == len(PROMPTS["chunks"]) and sess["sessions"][0]["chunks_done"] == 2
 
     detail = client.get(f"/api/monitor/sessions/{sid}").json()
     assert [c["prompt_seq"] for c in detail["chunks"]] == [1, 2] and detail["chunks"][0]["section"] == "en-words"
-    assert detail["note"] == "Ann"
+    assert detail["name"] == "Ann Example" and detail["note"] == "ward 3"
 
     strokes = client.get(f"/api/monitor/sessions/{sid}/strokes?chunk=2").json()["strokes"]
     assert len(strokes) == 2 and all(s["chunk"] == 2 and s["completed"] for s in strokes)
@@ -230,3 +235,50 @@ def test_monitor_is_refused_to_other_devices_on_the_network(config, tmp_path):
     # the iPad's endpoints stay open
     assert client.get("/capture").status_code == 200
     assert client.get("/api/prompts").status_code == 200
+
+
+# --- the writer types their own name on the tablet ---------------------------------------
+
+@pytest.mark.parametrize("name", ["", "   ", None])
+def test_a_writer_must_type_a_name(env, name):
+    client, store, _ = env
+    body = {"consent_project": True, "consent_sharing": False}
+    if name is not None:
+        body["name"] = name
+    r = client.post("/api/writers", json=body)
+    assert r.status_code == 422 and "name" in r.json()["detail"]
+    assert store.list_writers() == []                  # nobody is registered half-way
+
+
+def test_an_overlong_name_is_refused(env):
+    client, store, _ = env
+    r = client.post("/api/writers", json={"consent_project": True, "name": "x" * 101})
+    assert r.status_code == 422 and store.list_writers() == []
+
+
+def test_the_name_is_stored_trimmed_and_echoed_back(env):
+    client, store, _ = env
+    r = client.post("/api/writers", json={"consent_project": True, "name": "  Ann Example  "}).json()
+    assert r["name"] == "Ann Example" and store.get_writer(r["writer_id"])["name"] == "Ann Example"
+
+
+def test_names_are_never_returned_by_the_endpoints_the_tablet_can_reach(env):
+    """Anyone on the network can try writer IDs, so only the laptop-only monitor may show names."""
+    client, _, _ = env
+    wid, s = _writer_and_session(client)
+    sid = s["session_id"]
+    lan_responses = [
+        client.post("/api/sessions", json={"writer_id": wid}).text,
+        client.get(f"/api/sessions/{sid}").text,
+        client.post(f"/api/sessions/{sid}/chunks/{CHUNK1}", json={"events": _stroke(1.0)}).text,
+        client.post(f"/api/live/{sid}", json={"chunk_id": CHUNK1, "events": _stroke(1.0)}).text,
+    ]
+    assert all("Ann Example" not in text for text in lan_responses)
+
+
+def test_the_live_view_shows_who_is_writing(env):
+    client, _, _ = env
+    wid, s = _writer_and_session(client)
+    client.post(f"/api/live/{s['session_id']}", json={"chunk_id": CHUNK1, "text": "hi", "events": _stroke(1.0)})
+    live = client.get("/api/monitor/live?after=0").json()["sessions"][0]
+    assert live["writer_name"] == "Ann Example" and live["writer_id"] == wid

@@ -42,6 +42,16 @@
   .info { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 13px; }
   .empty { padding: 30px; color: var(--muted); }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .text.mono { font: 12px/1.45 ui-monospace, Consolas, monospace; max-height: 30vh; overflow: auto; }
+  .overview { overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; min-height: 0; }
+  #overview { grid-row: 2; }
+  .overview h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 0 8px; }
+  .overview h3:first-child { margin-top: 0; }
+  .cards { display: flex; flex-wrap: wrap; gap: 10px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 8px 16px; min-width: 110px; }
+  .card b { display: block; font-size: 26px; line-height: 1.2; } .card small { color: var(--muted); }
+  .sec { display: grid; grid-template-columns: 130px 1fr 70px; gap: 10px; align-items: center; margin: 5px 0; }
+  .sec .bar { margin: 0; height: 10px; }
   .btn { font: inherit; padding: 4px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); cursor: pointer; }
 </style>
 </head>
@@ -67,12 +77,14 @@
       <h2>Writers</h2><div id="writers"></div>
       <h2 id="sessionsH" hidden>Sessions</h2><div id="sessions"></div>
       <h2 id="chunksH" hidden>Chunks</h2><div id="chunks"></div>
+      <h2 id="probesH" hidden>Signal probes</h2><div id="probes"></div>
     </div>
     <div class="stage">
       <div><div class="text" id="arcText">Pick a writer, a session and a chunk.</div></div>
       <div style="display:grid;grid-template-rows:auto 1fr;gap:8px;min-height:0">
-        <div class="row"><button class="btn" id="prev">&#9664; Previous</button><button class="btn" id="nextC">Next &#9654;</button><span class="info" id="arcInfo"></span></div>
-        <div class="canvaswrap"><canvas id="arcCanvas"></canvas></div>
+        <div class="row" id="arcNav"><button class="btn" id="prev">&#9664; Previous</button><button class="btn" id="nextC">Next &#9654;</button><span class="info" id="arcInfo"></span></div>
+        <div class="canvaswrap" id="arcWrap"><canvas id="arcCanvas"></canvas></div>
+        <div class="overview" id="overview" hidden></div>
       </div>
     </div>
   </div>
@@ -124,7 +136,7 @@ async function pollLive() {
       if (e.reset) s.events = []; else s.events.push(e.e);
     }
     cursor = r.cursor; sessionsLive = r.sessions;
-    for (const s of r.sessions) { const x = lv(s.session_id); x.text = s.text; x.canvas = s.canvas; x.writer = s.writer_id; }
+    for (const s of r.sessions) { const x = lv(s.session_id); x.text = s.text; x.canvas = s.canvas; x.writer = s.writer_id; x.name = s.writer_name; }
     $("conn").textContent = ""; $("conn").className = "muted";
     if (!$("live").hidden) renderLive(r.entries.length > 0);
   } catch (e) { $("conn").textContent = "monitor cannot reach the server: " + e.message; }
@@ -135,7 +147,7 @@ function renderLive() {
     const best = sessionsLive.find(s => s.live) || sessionsLive[0]; picked = best ? best.session_id : null;
   }
   list.innerHTML = sessionsLive.map(s => `<button class="item ${s.session_id === picked ? "sel" : ""}" data-sid="${s.session_id}">
-    <span class="dot ${s.live ? "live" : ""}"></span><b>${esc(s.writer_id)}</b> &middot; session ${s.session_id}<br>
+    <span class="dot ${s.live ? "live" : ""}"></span><b>${esc(s.writer_name || s.writer_id)}</b> <small>${esc(s.writer_id)}</small> &middot; session ${s.session_id}<br>
     <small>${s.live ? "writing now" : "idle " + Math.round(s.idle_s) + " s"} &middot; ${esc(s.chunk_id)}</small></button>`).join("");
   for (const b of list.querySelectorAll(".item")) b.onclick = () => { picked = Number(b.dataset.sid); progHtml = ""; pollProgress(); renderLive(); };
   const s = picked === null ? null : lv(picked);
@@ -147,69 +159,109 @@ function renderLive() {
   for (const e of s.events) {
     if (e.k === "pointerdown") last = e;
     else if (e.k === "pointermove" && last && e.b > 0) { drawSeg(ctx, fx, last, e, false); last = e; }
-    else if (e.k === "pointermove" && e.b === 0) { if (last) last = null; }
+    // an unpressed sample is hover - or, inside a stroke, a stale hover sample Safari delivered late; neither ends the line
     else if (e.k === "pointerup" || e.k === "pointercancel") last = null;
   }
   const tip = s.events[s.events.length - 1];
   if (tip) { ctx.fillStyle = tip.b > 0 ? "#d33" : css("--accent"); ctx.beginPath(); ctx.arc(fx.x(tip.x), fx.y(tip.y), tip.b > 0 ? 4 : 6, 0, 7); ctx.fill(); }
   const strokes = s.events.filter(e => e.k === "pointerdown").length;
-  $("liveInfo").innerHTML = `<span>chunk ${esc(s.chunk)}</span><span>${strokes} stroke(s) in this chunk</span><span>${s.events.length} events</span><span>${progHtml}</span>`;
+  $("liveInfo").innerHTML = `<span><b>${esc(s.name || s.writer || "")}</b></span><span>chunk ${esc(s.chunk)}</span><span>${strokes} stroke(s) in this chunk</span><span>${s.events.length} events</span><span>${progHtml}</span>`;
 }
 async function pollProgress() {
   if (picked === null || $("live").hidden) return;
   try {
     const r = await get("/api/monitor/sessions/" + picked), done = r.chunks.length, pct = Math.round(100 * done / r.total_chunks);
     progHtml = `<b>${done} / ${r.total_chunks}</b> chunks saved (${pct}%)${r.note ? " &middot; note: " + esc(r.note) : ""}`;
+    if (r.name) { const el = lv(picked); el.name = r.name; }
   } catch (e) { /* the next poll will retry */ }
 }
 
 // ---------------- archive ----------------
-const AR = { writer: null, session: null, chunks: [], chunk: null };
+const AR = { writer: null, session: null, chunks: [], chunk: null, probe: null };
+const pick = (writer, session, chunk, probe) => { AR.writer = writer; AR.session = session; AR.chunk = chunk; AR.probe = probe; refreshArchive(); renderArchive(); };
 async function refreshArchive() {
   try {
-    const ws = await get("/api/monitor/writers");
-    $("writers").innerHTML = ws.length ? ws.map(w => `<button class="item ${w.id === AR.writer ? "sel" : ""}" data-id="${w.id}"><b>${w.id}</b> ${w.consent_sharing ? '<small>(sharing ok)</small>' : ""}<br>
+    const [ws, probes] = await Promise.all([get("/api/monitor/writers"), get("/api/monitor/probes")]);
+    $("writers").innerHTML = ws.length ? ws.map(w => `<button class="item ${w.id === AR.writer ? "sel" : ""}" data-id="${w.id}"><b>${esc(w.name || w.id)}</b> <small>${w.id}</small> ${w.consent_sharing ? '<small>(sharing ok)</small>' : ""}<br>
       <small>${esc(w.note) || "no note"} &middot; ${w.sessions} session(s), ${w.chunks_done} chunks</small></button>`).join("") : '<div class="muted">No writers yet.</div>';
-    for (const b of $("writers").querySelectorAll(".item")) b.onclick = () => { AR.writer = b.dataset.id; AR.session = AR.chunk = null; refreshArchive(); renderArchive(); };
+    for (const b of $("writers").querySelectorAll(".item")) b.onclick = () => pick(b.dataset.id, null, null, null);
+
+    $("probesH").hidden = probes.length === 0;
+    $("probes").innerHTML = probes.map(q => q.error
+      ? `<div class="item"><b>${esc(q.name)}</b><br><small>unreadable: ${esc(q.error)}</small></div>`
+      : `<button class="item ${q.name === AR.probe ? "sel" : ""}" data-name="${q.name}"><b>${esc(q.name.slice(6, 14))} ${esc(q.name.slice(15, 17))}:${esc(q.name.slice(17, 19))}</b><br>
+        <small>${q.pen_events} pen events &middot; ${q.rate_hz ?? "?"} samples/s &middot; ${q.size_kb} KB</small></button>`).join("");
+    for (const b of $("probes").querySelectorAll("button.item")) b.onclick = () => pick(AR.writer, null, null, b.dataset.name);
+
     if (AR.writer) {
       const r = await get(`/api/monitor/writers/${AR.writer}/sessions`);
       $("sessionsH").hidden = false;
       $("sessions").innerHTML = r.sessions.map(s => `<button class="item ${s.id === AR.session ? "sel" : ""}" data-id="${s.id}">session ${s.id} &middot; ${esc(s.prompt_set)}<br>
         <small>${s.chunks_done} / ${r.total_chunks} chunks &middot; ${s.samples} samples &middot; ${s.ended_at ? "finished" : "open"}<br>${esc(s.started_at)}</small>
         <div class="bar"><i style="width:${Math.round(100 * s.chunks_done / r.total_chunks)}%"></i></div></button>`).join("") || '<div class="muted">No sessions.</div>';
-      for (const b of $("sessions").querySelectorAll(".item")) b.onclick = () => { AR.session = Number(b.dataset.id); AR.chunk = null; refreshArchive(); renderArchive(); };
-    }
+      for (const b of $("sessions").querySelectorAll(".item")) b.onclick = () => pick(AR.writer, Number(b.dataset.id), null, null);
+    } else { $("sessionsH").hidden = true; $("sessions").innerHTML = ""; }
     if (AR.session) {
       const r = await get("/api/monitor/sessions/" + AR.session); AR.chunks = r.chunks;
       $("chunksH").hidden = false;
       $("chunks").innerHTML = r.chunks.map(c => `<button class="item ${c.prompt_seq === AR.chunk ? "sel" : ""}" data-seq="${c.prompt_seq}">
         <b>#${c.prompt_seq}</b> ${esc(c.section)} <small>${c.n_samples} samples</small><br><small>${esc((c.text || "").split("\n")[0])}</small></button>`).join("") || '<div class="muted">Nothing saved yet.</div>';
-      for (const b of $("chunks").querySelectorAll(".item")) b.onclick = () => { AR.chunk = Number(b.dataset.seq); refreshArchive(); renderArchive(); };
-    }
+      for (const b of $("chunks").querySelectorAll(".item")) b.onclick = () => pick(AR.writer, AR.session, Number(b.dataset.seq), null);
+    } else { $("chunksH").hidden = true; $("chunks").innerHTML = ""; }
+    if (!AR.chunk && !AR.probe) renderOverview();
   } catch (e) { $("conn").textContent = "cannot load archive: " + e.message; }
 }
-async function renderArchive() {
-  const { ctx, w, h } = prepare($("arcCanvas"));
-  const c = AR.chunks.find(x => x.prompt_seq === AR.chunk);
-  if (!AR.session || !c) { $("arcText").textContent = "Pick a writer, a session and a chunk."; $("arcInfo").textContent = ""; return; }
-  $("arcText").textContent = c.text || "";
-  const r = await get(`/api/monitor/sessions/${AR.session}/strokes?chunk=${AR.chunk}`), strokes = r.strokes;
-  const pts = strokes.flatMap(s => s.points);
+async function renderOverview() {
+  const o = await get("/api/monitor/overview?writer=" + encodeURIComponent(AR.writer || ""));
+  const t = o.totals, card = (n, label) => `<div class="card"><b>${n}</b><small>${label}</small></div>`;
+  let html = `<h3>Collected so far</h3><div class="cards">${card(t.writers, "writers")}${card(t.sessions, "sessions")}${card(t.chunks, "chunks stored")}${card(t.samples.toLocaleString(), "pen samples")}${card(t.probes, "signal probes")}</div>`;
+  if (o.writer) {
+    html += `<h3>${esc(o.writer.name || o.writer.id)} (${esc(o.writer.id)}) &middot; progress through the control text (${esc(o.prompt_set.id)})</h3>`;
+    html += o.sections.map(s => `<div class="sec"><span>${esc(s.section)}</span><div class="bar"><i style="width:${Math.round(100 * s.done / s.total)}%"></i></div><span>${s.done} / ${s.total}</span></div>`).join("");
+    const done = o.sections.reduce((a, s) => a + s.done, 0), all = o.sections.reduce((a, s) => a + s.total, 0);
+    html += `<p class="muted">${done} of ${all} chunks written. The full control text is about ${o.prompt_set.estimated_minutes} minutes of writing (an estimate).</p>`;
+  } else html += `<p class="muted">Pick a writer on the left to see which parts of the control text they have written, or a signal probe to see its recorded strokes.</p>`;
+  $("overview").innerHTML = html;
+}
+/** Draw polylines of [x, y, pressure, t] fitted to the canvas; hover trails are faint. */
+function drawPaths(ctx, w, h, strokes, trails) {
+  const pts = [...strokes.flat(), ...trails.flat()];
   if (!pts.length) return;
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-  const x0 = Math.min(...xs), y0 = Math.min(...ys), sw = Math.max(1, Math.max(...xs) - x0), sh = Math.max(1, Math.max(...ys) - y0);
-  const fx = fitter(w, h, sw, sh, x0, y0, 24);
-  for (const s of strokes) for (let i = 1; i < s.points.length; i++) {
-    const a = s.points[i - 1], b = s.points[i];
-    drawSeg(ctx, fx, { x: a[0], y: a[1] }, { x: b[0], y: b[1], pressure: b[2] }, false);
-  }
-  const press = pts.map(p => p[2]).filter(v => v != null), t = pts.map(p => p[3]);
-  $("arcInfo").innerHTML = `<span>${strokes.length} strokes</span><span>${pts.length} samples</span><span>${((Math.max(...t) - Math.min(...t)) / 1000).toFixed(1)} s</span>` +
-    (press.length ? `<span>max pressure ${Math.max(...press).toFixed(2)}</span>` : "");
+  const x0 = Math.min(...xs), y0 = Math.min(...ys);
+  const fx = fitter(w, h, Math.max(1, Math.max(...xs) - x0), Math.max(1, Math.max(...ys) - y0), x0, y0, 24);
+  const line = (poly, hover) => { for (let i = 1; i < poly.length; i++) drawSeg(ctx, fx, { x: poly[i - 1][0], y: poly[i - 1][1] }, { x: poly[i][0], y: poly[i][1], pressure: poly[i][2] }, hover); };
+  for (const tr of trails) line(tr, true);
+  for (const s of strokes) line(s, false);
+}
+const span = pts => { const t = pts.map(p => p[3]); return ((Math.max(...t) - Math.min(...t)) / 1000).toFixed(1) + " s"; };
+async function renderArchive() {
+  const showCanvas = !!(AR.probe || AR.chunk);
+  $("overview").hidden = showCanvas; $("arcWrap").hidden = !showCanvas; $("arcNav").hidden = !AR.chunk;
+  $("arcText").classList.toggle("mono", !!AR.probe);
+  if (!showCanvas) { $("arcText").textContent = "What has been collected"; $("arcInfo").textContent = ""; renderOverview(); return; }
+  const { ctx, w, h } = prepare($("arcCanvas"));
+  try {
+    if (AR.probe) {
+      const r = await get("/api/monitor/probes/" + AR.probe);
+      $("arcText").textContent = r.report;
+      drawPaths(ctx, w, h, r.strokes, r.hover);
+      $("arcInfo").innerHTML = `<span>${r.strokes.length} strokes</span><span>${r.hover.length} hover trails (grey)</span>`;
+      return;
+    }
+    const c = AR.chunks.find(x => x.prompt_seq === AR.chunk);
+    if (!c) return;
+    $("arcText").textContent = c.text || "";
+    const r = await get(`/api/monitor/sessions/${AR.session}/strokes?chunk=${AR.chunk}`), strokes = r.strokes.map(s => s.points), pts = strokes.flat();
+    drawPaths(ctx, w, h, strokes, []);
+    if (!pts.length) return;
+    const press = pts.map(p => p[2]).filter(v => v != null);
+    $("arcInfo").innerHTML = `<span>${strokes.length} strokes</span><span>${pts.length} samples</span><span>${span(pts)}</span>` + (press.length ? `<span>max pressure ${Math.max(...press).toFixed(2)}</span>` : "");
+  } catch (e) { $("arcInfo").textContent = "cannot draw: " + e.message; }
 }
 function step(d) {
   const i = AR.chunks.findIndex(x => x.prompt_seq === AR.chunk), j = Math.min(AR.chunks.length - 1, Math.max(0, i + d));
-  if (AR.chunks[j]) { AR.chunk = AR.chunks[j].prompt_seq; refreshArchive(); renderArchive(); }
+  if (AR.chunks[j]) pick(AR.writer, AR.session, AR.chunks[j].prompt_seq, null);
 }
 $("prev").onclick = () => step(-1); $("nextC").onclick = () => step(1);
 window.addEventListener("resize", () => { renderLive(); renderArchive(); });

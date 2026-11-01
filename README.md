@@ -37,7 +37,7 @@ Open the printed `http://<laptop-ip>:8000/` on the iPad (same Wi-Fi), follow the
 python -m laxthya_ink.capture
 ```
 
-On the iPad (same Wi-Fi), open the **writing app** `http://<laptop-ip>:8000/capture`: accept the consent form, then write each short piece of text with the Apple Pencil and tap Next; every piece is sent to the laptop as soon as you finish it. On the laptop open the **monitor** `http://127.0.0.1:8000/monitor` to watch live and browse old sessions (the monitor only works on the laptop itself). A session resumes where it stopped. Regenerate the control text with `python -m laxthya_ink.capture.prompts`.
+On the iPad (same Wi-Fi), open the **writing app** `http://<laptop-ip>:8000/capture`: accept the consent form, then write each short piece of text with the Apple Pencil and tap Next; every piece is sent to the laptop as soon as you finish it. On the laptop open the **monitor** `http://127.0.0.1:8000/monitor` to watch live and browse old sessions (the monitor only works on the laptop itself). A session resumes where it stopped. The monitor's Archive tab also shows an overview of what has been collected and the saved signal probes. The English text is built from a public word list kept out of the repo: run `python tools/fetch_wordlist.py` once, then regenerate the control text with `python -m laxthya_ink.capture.prompts`.
 
 ## How it works
 

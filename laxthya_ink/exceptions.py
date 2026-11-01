@@ -55,6 +55,10 @@ class ConsentRequiredError(StoreError):
     """A writer cannot be added without the required project-use consent."""
 
 
+class WordListError(InkError):
+    """The English word list the control text is built from is missing or unusable."""
+
+
 class WritingAreaError(InkError):
     """The strokes, once laid out, fall outside the configured paper area."""
 

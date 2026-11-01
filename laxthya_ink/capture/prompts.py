@@ -2,13 +2,23 @@
 
 Decisions this implements (docs/PROJECT_PLAN.md): tiered coverage with the core session
 first; English + digits + the full Greek alphabet + math symbols + all 247 Tamil letters;
-English built from real common words plus short filler strings only for letter pairs the
-words miss; chunks of about a minute so each can be sent to the laptop as soon as it is
-written.
+English built from **real common words only** (no made-up filler strings) so that every
+*natural* letter pair is covered; chunks of about a minute so each can be sent to the laptop
+as soon as it is written.
 
-Pure and deterministic: the same config always produces the same text (`prompts.seed`).
-The generated file `prompts/<id>.json` is committed; `python -m laxthya_ink.capture.prompts`
-rebuilds it and `--check` verifies the committed file is current and fully covered.
+A letter pair is *natural* if at least `prompts.natural_min_words` words of the word list
+contain it. Natural pairs are covered `prompts.pair_min` times by the fewest letters the
+greedy search can find. Pairs that real English almost never uses (bq, dq, pz...) are left
+to the extended session and listed in the output as `deferred_pairs`.
+
+The word list is not part of the repository (its licence allows research use but says
+nothing clear about redistribution): fetch it with `python tools/fetch_wordlist.py`.
+Only the generated text, with the list of natural pairs it was built to cover, is
+committed, so the coverage check needs no word list.
+
+Pure and deterministic: the same config and word list always give the same text
+(`prompts.seed`). `python -m laxthya_ink.capture.prompts` rebuilds `prompts/<id>.json`;
+`--check` verifies the committed file is covered (and current, if the word list is present).
 
 Sections, in writing order:  en-words, en-capitals, digits, punctuation, greek, greek-use,
 tamil. A chunk never spans two sections. Effort is counted in *units* (one Latin character
@@ -29,16 +39,16 @@ from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
+from ..exceptions import WordListError
+
 PACKAGE_DIR = Path(__file__).resolve().parent
 PROMPT_DIR = PACKAGE_DIR / "prompts"
-WORDS_FILE = PACKAGE_DIR / "words_en.txt"
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 STYLE = "natural"                     # the core set is the writer's natural hand
 
 LOWER = string.ascii_lowercase
 ALL_PAIRS = [a + b for a in LOWER for b in LOWER]
-_VOWELS = "aeiouy"
 _SET_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 # --- content ----------------------------------------------------------------
@@ -107,71 +117,101 @@ def tamil_letters() -> list[str]:
     return letters
 
 
-# --- English letter pairs ---------------------------------------------------
+# --- English: real words that cover the natural letter pairs -----------------
 
 def _pairs(word: str) -> list[str]:
     return [word[i:i + 2] for i in range(len(word) - 1)]
 
 
-def load_words(path: Path = WORDS_FILE) -> list[str]:
-    """The word list: lowercase a-z only, unique, in file order; `#` lines are comments."""
+def load_words(path: Path) -> list[str]:
+    """A frequency-ordered word list: lowercase a-z only, unique, most frequent first.
+
+    Raises `WordListError` if the file is missing or holds no usable word.
+    """
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise WordListError(
+            f"cannot read the word list {path} ({exc.strerror or exc}); "
+            f"download it with: python tools/fetch_wordlist.py"
+        ) from exc
     seen: dict[str, None] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         if line.lstrip().startswith("#"):
-            continue
+            continue                                      # comment line
         for w in line.split():
             if len(w) >= 2 and all(c in LOWER for c in w):
                 seen.setdefault(w)
+    if not seen:
+        raise WordListError(f"{path} contains no usable words (lowercase a-z, one or more per line)")
     return list(seen)
 
 
-def pick_words(words: list[str], pair_min: int) -> tuple[list[str], Counter]:
-    """Greedily choose words until no remaining word adds coverage; returns (chosen, pair counts)."""
-    counts: Counter = Counter()
-    pool = list(words)
-    chosen: list[str] = []
-    while True:
-        best, best_gain = None, 0
-        for w in pool:
-            gain = sum(min(pair_min - counts[p], c) for p, c in Counter(_pairs(w)).items() if counts[p] < pair_min)
-            if gain > best_gain or (gain == best_gain and gain > 0 and best is not None and len(w) < len(best)):
-                best, best_gain = w, gain
-        if best is None:
-            return chosen, counts
-        chosen.append(best)
-        pool.remove(best)
-        counts.update(_pairs(best))
+_VOWELS = "aeiouy"
 
 
-def make_fillers(counts: Counter, pair_min: int) -> list[str]:
-    """Short strings that cover the pairs still below `pair_min` (the words never reach them).
+def is_plausible_word(word: str, max_consonant_run: int) -> bool:
+    """A word a person would write as a word: it has a vowel and no long run of consonants.
 
-    Needed pairs are chained when one ends where the next starts, up to six letters, and a
-    string with no vowel gets an 'a' so it can be written as a word. Padding can add pairs,
-    which only helps coverage.
+    This drops the acronyms and brand codes a web-derived list is full of (gtk, wto, xhtml).
     """
-    need = {p: pair_min - counts[p] for p in ALL_PAIRS if counts[p] < pair_min}
-    fillers: list[str] = []
-    while need:
-        pair = min(need)
-        word = pair
-        _consume(need, pair)
-        while len(word) < 6:
-            nxt = [q for q in sorted(need) if q[0] == word[-1]]
-            if not nxt:
-                break
-            word += nxt[0][1]
-            _consume(need, nxt[0])
-        if not any(c in _VOWELS for c in word):
-            word += "a"
-        fillers.append(word)
-    return fillers
+    if not any(c in _VOWELS for c in word):
+        return False
+    run = 0
+    for c in word:
+        run = 0 if c in _VOWELS else run + 1
+        if run > max_consonant_run:
+            return False
+    return True
 
 
-def _consume(need: dict[str, int], pair: str) -> None:
-    need[pair] -= 1
-    if need[pair] <= 0:
-        del need[pair]
+def candidate_pool(words: list[str], config: dict) -> list[str]:
+    """The words the greedy search may pick from: the most frequent `pool_size`, long enough,
+    and plausible as words."""
+    p = config["prompts"]
+    return [w for w in words[: p["pool_size"]]
+            if len(w) >= p["min_word_length"] and is_plausible_word(w, p["max_consonant_run"])]
+
+
+def natural_pairs(pool: list[str], min_words: int) -> list[str]:
+    """Letter pairs that occur in at least `min_words` different words of the pool, sorted."""
+    support: Counter = Counter()
+    for w in pool:
+        support.update(set(_pairs(w)))
+    return sorted(p for p in ALL_PAIRS if support[p] >= min_words)
+
+
+def pick_words(pool: list[str], needed: list[str], pair_min: int) -> tuple[list[str], Counter]:
+    """Greedily choose words until every needed pair appears `pair_min` times.
+
+    Each step takes the word that adds the most still-missing pair occurrences per letter
+    written (shorter and more useful first); ties go to the more frequent word. Returns
+    (chosen words, pair counts over them). Stops early if some pair cannot be reached.
+    """
+    deficit = {p: pair_min for p in needed}
+    useful = {w: Counter(p for p in _pairs(w) if p in deficit) for w in pool}
+    counts: Counter = Counter()
+    chosen: list[str] = []
+    remaining = [w for w in pool if useful[w]]
+    while any(d > 0 for d in deficit.values()):
+        best, best_key = None, (0.0, 0)
+        for index, w in enumerate(remaining):
+            gain = sum(min(deficit[p], c) for p, c in useful[w].items() if deficit[p] > 0)
+            if gain == 0:
+                continue
+            key = (gain / len(w), gain)
+            if best is None or key > best_key:               # strict: earlier (more frequent) word wins ties
+                best, best_key = (index, w), key
+        if best is None:
+            break
+        index, word = best
+        chosen.append(word)
+        remaining.pop(index)
+        counts.update(_pairs(word))
+        for p in useful[word]:
+            if deficit[p] > 0:
+                deficit[p] -= useful[word][p]
+    return chosen, counts
 
 
 def de_bruijn_digits() -> str:
@@ -240,16 +280,26 @@ def _shuffled_repeats(tokens: list[str], repeats: int, rng: random.Random) -> li
     return out
 
 
-def _sections(config: dict) -> tuple[list[dict], list[str]]:
-    """Build every section's lines. Returns (sections, filler strings used)."""
+def _english(words: list[str], config: dict) -> tuple[list[str], list[str], list[str]]:
+    """(chosen words, natural pairs, deferred pairs) for the given frequency-ordered word list."""
+    p = config["prompts"]
+    pool = candidate_pool(words, config)
+    natural = natural_pairs(pool, p["natural_min_words"])
+    chosen, counts = pick_words(pool, natural, p["pair_min"])
+    short = [pair for pair in natural if counts[pair] < p["pair_min"]]
+    if short:
+        raise WordListError(f"the word list cannot cover {len(short)} natural pairs {p['pair_min']} times: {' '.join(short[:15])}")
+    return chosen, natural, [pair for pair in ALL_PAIRS if pair not in set(natural)]
+
+
+def _sections(config: dict, chosen: list[str]) -> list[dict]:
+    """Build every section's lines from the chosen English words."""
     p = config["prompts"]
     w = p["units_per_glyph"]
     rng = random.Random(p["seed"])
     line_units, repeats = p["line_units"], p["glyph_repeats"]
 
-    chosen, counts = pick_words(load_words(), p["pair_min"])
-    fillers = make_fillers(counts, p["pair_min"])
-    words = chosen + fillers
+    words = list(chosen)
     rng.shuffle(words)
 
     caps = [word for pair in CAPITAL_WORDS.values() for word in pair]
@@ -270,7 +320,7 @@ def _sections(config: dict) -> tuple[list[dict], list[str]]:
         {"id": "en-capitals", "script": "latin", "intro": "Names and places with capital letters.",
          "lines": latin(caps, w["latin"])},
         {"id": "digits", "script": "digit", "intro": "Numbers. Write each group exactly as shown.",
-         "lines": latin(_shuffled_repeats(digit_tokens(), 1, rng), w["digit"])},
+         "lines": latin(digit_tokens(), w["digit"])},
         {"id": "punctuation", "script": "symbol", "intro": "Punctuation and signs.",
          "lines": _text_lines(punct_lines, w["symbol"])},
         {"id": "greek", "script": "greek", "intro": "Greek letters and math signs, one at a time.",
@@ -279,16 +329,24 @@ def _sections(config: dict) -> tuple[list[dict], list[str]]:
          "lines": _text_lines(greek_use, w["greek"])},
         {"id": "tamil", "script": "tamil", "intro": "Tamil letters, one at a time. Write each as you normally would.",
          "lines": _pack(_shuffled_repeats(tamil_letters(), repeats, rng), lambda t: w["tamil"], 0.0, line_units)},
-    ], fillers
+    ]
 
 
-def build_prompt_set(config: dict, set_id: str | None = None) -> dict:
-    """Generate the whole control text as a JSON-ready dict."""
+def build_prompt_set(config: dict, words: list[str] | None = None, set_id: str | None = None) -> dict:
+    """Generate the whole control text as a JSON-ready dict.
+
+    `words` is a frequency-ordered word list; by default it is read from `prompts.word_list`.
+    """
+    from ..config import resolve_path
+
     p = config["prompts"]
     set_id = set_id or config["capture"]["prompt_set_id"]
     if not _SET_ID_RE.match(set_id):
         raise ValueError(f"prompt set id must be lowercase letters, digits and dashes, got {set_id!r}")
-    sections, fillers = _sections(config)
+    if words is None:
+        words = load_words(resolve_path(p["word_list"]))
+    chosen, natural, deferred = _english(words, config)
+    sections = _sections(config, chosen)
 
     chunks: list[dict] = []
     for sec in sections:
@@ -320,8 +378,12 @@ def build_prompt_set(config: dict, set_id: str | None = None) -> dict:
         "id": set_id,
         "format": FORMAT_VERSION,
         "style": STYLE,
-        "params": {k: p[k] for k in ("seed", "pair_min", "glyph_repeats", "chunk_units", "line_units")},
-        "fillers": fillers,
+        "params": {k: p[k] for k in ("seed", "pair_min", "natural_min_words", "pool_size", "min_word_length",
+                                     "max_consonant_run", "glyph_repeats", "chunk_units", "line_units")},
+        "word_source": Path(p["word_list"]).name,
+        "english_words": len(chosen),
+        "natural_pairs": natural,
+        "deferred_pairs": deferred,
         "total_units": round(total, 1),
         "estimated_minutes": round(total / p["writing_units_per_minute"], 1),
         "break_every_chunks": p["break_every_chunks"],
@@ -338,17 +400,23 @@ def _section_text(prompt_set: dict, section: str) -> list[str]:
 
 def check_coverage(prompt_set: dict, config: dict) -> dict:
     """Verify the text really contains what the decisions promised. Returns
-    `{"problems": [...], "stats": {...}}`; no problems means fully covered."""
+    `{"problems": [...], "stats": {...}}`; no problems means fully covered.
+
+    Needs no word list: the natural pairs the text was built to cover are stored in it.
+    """
     p = config["prompts"]
     problems: list[str] = []
 
+    required = prompt_set.get("natural_pairs", [])
+    if not required:
+        problems.append("the prompt set lists no natural letter pairs, so English coverage cannot be checked")
     pair_counts: Counter = Counter()
     for line in _section_text(prompt_set, "en-words"):
         for word in line.split():
             pair_counts.update(_pairs(word))
-    short = sorted(pp for pp in ALL_PAIRS if pair_counts[pp] < p["pair_min"])
+    short = [pp for pp in required if pair_counts[pp] < p["pair_min"]]
     if short:
-        problems.append(f"{len(short)} letter pairs appear fewer than {p['pair_min']} times: {' '.join(short[:20])}")
+        problems.append(f"{len(short)} natural letter pairs appear fewer than {p['pair_min']} times: {' '.join(short[:20])}")
 
     initials: Counter = Counter(w[0] for line in _section_text(prompt_set, "en-capitals") for w in line.split())
     missing_caps = [c for c in string.ascii_uppercase if initials[c] < 2]
@@ -396,8 +464,10 @@ def check_coverage(prompt_set: dict, config: dict) -> dict:
         "stats": {
             "chunks": len(prompt_set["chunks"]),
             "chunks_by_section": dict(by_section),
-            "fillers": len(prompt_set["fillers"]),
-            "min_pair_count": min(pair_counts[pp] for pp in ALL_PAIRS),
+            "english_words": prompt_set.get("english_words"),
+            "natural_pairs": len(required),
+            "deferred_pairs": len(prompt_set.get("deferred_pairs", [])),
+            "min_natural_pair_count": min((pair_counts[pp] for pp in required), default=0),
             "tamil_letters": len(set(letters)),
             "total_units": prompt_set["total_units"],
             "estimated_minutes": prompt_set["estimated_minutes"],
@@ -429,24 +499,39 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="python -m laxthya_ink.capture.prompts")
     parser.add_argument("--check", action="store_true",
-                        help="do not write; verify the committed file is current and fully covered")
+                        help="do not write; verify the committed file is covered (and current, if the word list is present)")
     args = parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
     config = load_config()
-    built = build_prompt_set(config)
+    set_id = config["capture"]["prompt_set_id"]
+
+    if args.check:
+        committed = load_prompt_set(set_id)
+        report = check_coverage(committed, config)
+        for problem in report["problems"]:
+            print("PROBLEM:", problem)
+        print("stats:", json.dumps(report["stats"], ensure_ascii=False))
+        try:
+            current = build_prompt_set(config)
+        except WordListError as exc:
+            print(f"note: not comparing with a fresh build ({exc})")
+            return 1 if report["problems"] else 0
+        if current != committed:
+            print(f"FAIL: {prompt_path(set_id)} is out of date - run without --check to regenerate")
+            return 1
+        return 1 if report["problems"] else 0
+
+    try:
+        built = build_prompt_set(config)
+    except WordListError as exc:
+        print("FAIL:", exc)
+        return 1
     report = check_coverage(built, config)
     for problem in report["problems"]:
         print("PROBLEM:", problem)
     print("stats:", json.dumps(report["stats"], ensure_ascii=False))
-
-    if args.check:
-        committed = load_prompt_set(built["id"])
-        if committed != built:
-            print(f"FAIL: {prompt_path(built['id'])} is out of date - run without --check to regenerate")
-            return 1
-        return 1 if report["problems"] else 0
     if report["problems"]:
         return 1
     print("wrote", save_prompt_set(built))
